@@ -1,0 +1,16 @@
+{
+  "name": "fogbugz-mcp",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": {
+    "fogbugz-mcp": "./index.js"
+  },
+  "dependencies": {
+    "form-data": "^4.0.0",
+    "undici": "^6.19.8",
+    "xml2js": "^0.6.2"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.0"
+  }
+}

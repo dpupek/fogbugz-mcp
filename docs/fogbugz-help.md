@@ -10,16 +10,20 @@
 - `search_cases`: Run FogBugz query syntax searches. Optional `cols` controls returned columns (comma-separated XML column names).
 - `case_events`: Same as `search_cases` but always includes the `events` column (can be very large). Event code reference: https://support.fogbugz.com/article/55756-fogbugz-xml-api-event-codes
 - `view_case`: Fetch a specific case with optional `cols`.
-- `create_case`: Create a case (`title`, `ixProject` required; supports `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `21_UserStory`).
-- `edit_case`: Update title, user story (`21_UserStory`), event, or arbitrary FogBugz fields.
+- `create_case`: Create a case (`title`, `ixProject` required; supports `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`).
+- `edit_case`: Update title, user story (`userStory`), event, or arbitrary FogBugz fields.
 - `add_comment`: Adds an event comment (`text`) to a case.
 - `attach_file`: Uploads a base64-encoded attachment (`contentBase64`) as `filename`.
 - `list_children`: Lists child cases. Falls back to a search when `ixBugChildren` is absent.
+- `case_outline`: Returns the full descendant tree for a case using the FogBugz `outline:<ixBug>` search syntax (handy for epics/parent tracking).
 - `resolve_case`: Resolves a case and optionally posts a comment or extra fields.
 - `reactivate_case`: Reopens a case and optionally posts a comment or extra fields.
-- `case_events`: Same as `search_cases` but always includes the `events` column (can be large).
 - `list_categories`: Returns FogBugz categories (`ixCategory`, names, metadata).
+- `list_areas`: Lists undeleted areas; pass `ixProject` to scope the results to a single project.
+- `list_custom_fields`: Returns the custom-field names available on a specific case by querying `plugin_customfield` columns.
 - Legacy dotted names (e.g., `fogbugz.help`) still work for backward compatibility.
+
+> `userStory` arguments automatically map to the FogBugz custom field `plugin_customfields_at_fogcreek_com_userxstoryh815` so you never need to remember the raw XML name.
 
 ### Query Syntax Tips
 - Combine filters with spaces (each term narrows results): `project:"Support" status:active assignedto:"Jane Smith"`.
@@ -55,10 +59,19 @@
   1. Call `create_case` with `ixBugParent` set to the parent case ID.  
   2. Include `ixFixFor` if the case should start in a specific milestone.  
   3. Add `category` (e.g., `category="Engineering Task"`) to set the case category.  
-  4. Provide optional `ixPersonAssignedTo` or `ixArea` as needed.
+  4. Provide optional `ixPersonAssignedTo`, `ixArea`, or `userStory` as needed.
 - **Resolve a case with context**  
   1. Prepare your resolution comment.  
   2. Call `resolve_case` with `comment` and optional fields like `{ sStatus: "Resolved (Fixed)" }`.
 - **Reopen a case**  
   1. Call `reactivate_case` with `comment` describing the regression.  
   2. Follow up with `edit_case` if more fields need adjustment.
+- **Find all active cases in a milestone**  
+  1. Call `search_cases` (or `case_events` if you need history) with `q="status:active fixfor:\"Milestone Name\""`.  
+  2. Optionally add columns (`cols="ixBug,sTitle,sPersonAssignedTo"`) to tailor the response.  
+  3. Iterate the returned cases or feed them into follow-up tools (`view_case`, `add_comment`, etc.).
+- **Get details for every descendant case**  
+  1. Run `case_outline` with `ixBug=<epic-id>`; the result contains `outline` (root) and `forest` (all top-level branches).  
+  2. Traverse the `children` arrays directly, or for richer fields call `view_case` on each `ixBug`.  
+  3. Combine with `list_children` if you only need a single level of the hierarchy.
+  4. Use the cols param to include columns for each child. This way you can pull details for many decendants at once. NOTE: Be careful with the cols, because you could inflect a large data pull that may fail.

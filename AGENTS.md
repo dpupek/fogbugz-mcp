@@ -21,13 +21,16 @@
 - `help` – Returns the guidance markdown (same as the static `help` resource).
 - `search_cases` – FogBugz `search` wrapper (`q`, optional `cols`).
 - `view_case` – Fetch case details (`ixBug`, optional `cols`), with fallback search when `view` fails.
-- `create_case` – Create new case (`title`, `ixProject`, plus optional `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `21_UserStory`).
-- `edit_case` – Edit title, `21_UserStory`, event, or arbitrary FogBugz fields on an existing case (`ixBug`, optional `event`, `fields`).
+- `create_case` – Create new case (`title`, `ixProject`, plus optional `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`).
+- `edit_case` – Edit title, `userStory`, event, or arbitrary FogBugz fields on an existing case (`ixBug`, optional `event`, `fields`).
 - `case_events` – Search cases but always include the FogBugz `events` column (large payload). 
 - `list_categories` – List FogBugz categories (`ixCategory`, metadata) via `cmd=listCategories`.
+- `list_areas` – List undeleted areas, optionally filtered by `ixProject` via `cmd=listAreas`.
+- `list_custom_fields` – Discover custom-field names on a case by running a `search` with `cols=plugin_customfield`.
 - `add_comment` – Add a comment (`ixBug`, `text`).
 - `attach_file` – Attach base64 file body (`ixBug`, `filename`, `contentBase64`).
 - `list_children` – List child cases of a parent (`ixBug`). Uses `view` first, falls back to `search parent:<id>`.
+- `case_outline` – Generate the full descendant tree for a case via `outline:<ixBug>` search (useful for epic/parent reviews).
 - `resolve_case` – Resolve a case (`ixBug`, optional `comment`, `fields`).
 - `reactivate_case` – Reactivate/reopen a case (`ixBug`, optional `comment`, `fields`).
 

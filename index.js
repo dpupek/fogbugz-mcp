@@ -26,8 +26,9 @@ const DEFAULT_COLS = [
   'sPersonAssignedTo',
   'sArea',
   'sProject',
-  '21_UserStory',
+  'plugin_customfields_at_fogcreek_com_userxstoryh815',
 ];
+const USER_STORY_FIELD = 'plugin_customfields_at_fogcreek_com_userxstoryh815';
 
 function logDebug(...args) {
   if (!DEBUG && !LOG_FILE) return;
@@ -146,6 +147,13 @@ function columnsWithDefaults(cols) {
   return [...new Set([...DEFAULT_COLS, ...userCols])].join(',');
 }
 
+function withUserStory(record) {
+  if (!record || typeof record !== 'object') return record;
+  if ('userStory' in record) return record;
+  if (record[USER_STORY_FIELD] === undefined) return record;
+  return { ...record, userStory: record[USER_STORY_FIELD] };
+}
+
 async function handleViewCase({ ixBug, cols }) {
   const colString = columnsWithDefaults(cols);
   const resp = await fbCall({ cmd: 'view', ixBug: String(ixBug), cols: colString });
@@ -158,19 +166,19 @@ async function handleViewCase({ ixBug, cols }) {
     const first = list[0];
     if (!first) return jsonResult({ case: null, raw: fallback });
     return jsonResult({
-      case: { ...first, ixBug: normalizeIxBug(first.ixBug, ixBug), _source: 'search' },
+      case: withUserStory({ ...first, ixBug: normalizeIxBug(first.ixBug, ixBug), _source: 'search' }),
       raw: fallback,
     });
   }
 
   if (Array.isArray(caseData)) {
-    caseData = caseData.map((item) => ({
+    caseData = caseData.map((item) => withUserStory({
       ...item,
       ixBug: normalizeIxBug(item.ixBug, ixBug),
       _source: item._source || 'view',
     }));
   } else if (caseData && typeof caseData === 'object') {
-    caseData = { ...caseData, ixBug: normalizeIxBug(caseData.ixBug, ixBug), _source: 'view' };
+    caseData = withUserStory({ ...caseData, ixBug: normalizeIxBug(caseData.ixBug, ixBug), _source: 'view' });
   }
   return jsonResult({ case: caseData, raw: resp });
 }
@@ -180,7 +188,7 @@ async function handleSearchCases({ q, cols }) {
   const resp = await fbCall({ cmd: 'search', q, cols: colString });
   let list = resp?.cases?.case || [];
   if (!Array.isArray(list)) list = list ? [list] : [];
-  const normalized = list.map((item) => ({ ...item, ixBug: normalizeIxBug(item.ixBug, null) }));
+  const normalized = list.map((item) => withUserStory({ ...item, ixBug: normalizeIxBug(item.ixBug, null) }));
   return jsonResult({ cases: normalized, raw: resp });
 }
 
@@ -192,7 +200,7 @@ async function handleCaseEvents({ q, cols }) {
   const resp = await fbCall({ cmd: 'search', q, cols: colString });
   let list = resp?.cases?.case || [];
   if (!Array.isArray(list)) list = list ? [list] : [];
-  const normalized = list.map((item) => ({ ...item, ixBug: normalizeIxBug(item.ixBug, null) }));
+  const normalized = list.map((item) => withUserStory({ ...item, ixBug: normalizeIxBug(item.ixBug, null) }));
   return jsonResult({ cases: normalized, raw: resp });
 }
 
@@ -208,6 +216,7 @@ async function handleCreateCase(args) {
     }
   }
 
+  const userStoryValue = args.userStory ?? args['21_UserStory'];
   const payload = {
     cmd: 'new',
     sTitle: args.title,
@@ -218,18 +227,19 @@ async function handleCreateCase(args) {
     ...(args.ixBugParent ? { ixBugParent: String(args.ixBugParent) } : {}),
     ...(args.ixFixFor ? { ixFixFor: String(args.ixFixFor) } : {}),
     ...(categoryValue !== undefined ? { ixCategory: String(categoryValue) } : {}),
-    ...('21_UserStory' in args && args['21_UserStory'] ? { '21_UserStory': String(args['21_UserStory']) } : {}),
+    ...(userStoryValue ? { [USER_STORY_FIELD]: String(userStoryValue) } : {}),
   };
 
   const resp = await fbCall(payload);
   return jsonResult({ ixBug: Number(resp?.case?.ixBug), raw: resp });
 }
 
-async function handleEditCase({ ixBug, event, fields, title, '21_UserStory': userStory }) {
+async function handleEditCase({ ixBug, event, fields, title, userStory, '21_UserStory': legacyUserStory }) {
   const payload = { cmd: 'edit', ixBug: String(ixBug) };
   if (event) payload.sEvent = event;
   if (title) payload.sTitle = title;
-  if (userStory) payload['21_UserStory'] = userStory;
+  const finalStory = userStory ?? legacyUserStory;
+  if (finalStory) payload[USER_STORY_FIELD] = finalStory;
   if (fields) for (const [k, v] of Object.entries(fields)) payload[k] = String(v);
   const resp = await fbCall(payload);
   return jsonResult(resp);
@@ -275,6 +285,52 @@ async function handleChildren({ ixBug }) {
   return jsonResult({ parent: ixBug, children });
 }
 
+async function handleCaseOutline({ ixBug, cols }) {
+  const colString = columnsWithDefaults(cols);
+  const resp = await fbCall({ cmd: 'search', sSearchFor: `outline:${ixBug}`, cols: colString });
+  let cases = resp?.cases?.case || [];
+  if (!Array.isArray(cases)) cases = cases ? [cases] : [];
+  const nodesById = new Map();
+
+  for (const item of cases) {
+    const id = normalizeIxBug(item?.ixBug, null);
+    if (id === null) continue;
+    const parentId = normalizeIxBug(item?.ixBugParent, null);
+    nodesById.set(id, {
+      ixBug: id,
+      ixBugParent: parentId,
+      sTitle: item?.sTitle ?? '',
+      sStatus: item?.sStatus ?? '',
+      sPersonAssignedTo: item?.sPersonAssignedTo ?? '',
+      dtLastUpdated: item?.dtLastUpdated ?? '',
+      sProject: item?.sProject,
+      sArea: item?.sArea,
+      children: [],
+    });
+  }
+
+  nodesById.forEach((node) => {
+    if (node.ixBugParent && nodesById.has(node.ixBugParent)) {
+      nodesById.get(node.ixBugParent).children.push(node);
+    }
+  });
+
+  const forest = [];
+  nodesById.forEach((node) => {
+    if (!node.ixBugParent || !nodesById.has(node.ixBugParent)) forest.push(node);
+  });
+
+  const outlineRoot = nodesById.get(ixBug) || forest[0] || null;
+
+  return jsonResult({
+    query: `outline:${ixBug}`,
+    outline: outlineRoot,
+    forest,
+    total: nodesById.size,
+    raw: resp,
+  });
+}
+
 async function handleResolve({ ixBug, comment, fields }) {
   const payload = { cmd: 'resolve', ixBug: String(ixBug) };
   if (comment) payload.sEvent = comment;
@@ -299,6 +355,52 @@ async function handleListCategories() {
   return jsonResult({ categories: normalized, raw: resp });
 }
 
+async function handleListAreas({ ixProject }) {
+  const payload = { cmd: 'listAreas', ...(ixProject ? { ixProject: String(ixProject) } : {}) };
+  const resp = await fbCall(payload);
+  let list = resp?.areas?.area || [];
+  if (!Array.isArray(list)) list = list ? [list] : [];
+  const normalized = list.map((area) => ({
+    ...area,
+    ixArea: Number(area.ixArea),
+    ixProject: area.ixProject !== undefined ? Number(area.ixProject) : undefined,
+  }));
+  return jsonResult({ areas: normalized, raw: resp });
+}
+
+function collectCustomFieldNames(source, bucket) {
+  if (!source) return;
+  if (Array.isArray(source)) {
+    source.forEach((item) => collectCustomFieldNames(item, bucket));
+    return;
+  }
+  if (typeof source === 'string') {
+    if (source.trim()) bucket.add(source.trim());
+    return;
+  }
+  if (typeof source !== 'object') return;
+
+  const possibleName = source.fieldname || source.name || source.Title || source.title;
+  if (possibleName) bucket.add(String(possibleName));
+
+  for (const value of Object.values(source)) {
+    if (value && typeof value === 'object') collectCustomFieldNames(value, bucket);
+  }
+}
+
+async function handleListCustomFields({ ixBug }) {
+  const resp = await fbCall({ cmd: 'search', q: String(ixBug), cols: 'plugin_customfield,plugin_customfields' });
+  let cases = resp?.cases?.case || [];
+  if (!Array.isArray(cases)) cases = cases ? [cases] : [];
+  const target = cases.find((item) => Number(item?.ixBug) === Number(ixBug)) || cases[0];
+  const names = new Set();
+  if (target) {
+    collectCustomFieldNames(target.plugin_customfields, names);
+    collectCustomFieldNames(target.plugin_customfield, names);
+  }
+  return jsonResult({ ixBug, customFields: Array.from(names), rawCount: names.size });
+}
+
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
 const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.0' }, { instructions });
 
@@ -314,6 +416,7 @@ const createSchema = {
   ixBugParent: z.number().int().optional(),
   ixFixFor: z.number().int().optional(),
   category: z.union([z.string(), z.number()]).optional(),
+  userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
 };
 const editSchema = {
@@ -321,6 +424,7 @@ const editSchema = {
   event: z.string().optional(),
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
   title: z.string().optional(),
+  userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
 };
 const commentSchema = { ixBug: z.number().int(), text: z.string() };
@@ -331,6 +435,8 @@ const optionalFieldsSchema = {
   comment: z.string().optional(),
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
 };
+const listAreasSchema = { ixProject: z.number().int().optional() };
+const listCustomFieldSchema = { ixBug: z.number().int() };
 
 function registerTool(name, description, schemaShape, handler) {
   mcpServer.registerTool(
@@ -372,11 +478,14 @@ registerTool('add_comment', 'Add a comment to a case.', commentSchema, handleCom
 registerTool('attach_file', 'Attach a base64-encoded file to a case.', attachSchema, handleAttach);
 
 registerTool('list_children', 'List child cases of a parent.', singleIxBugSchema, handleChildren);
+registerTool('case_outline', 'Return the full outline/descendant tree for a case (outline:<ixBug>).', viewSchema, handleCaseOutline);
 
 registerTool('resolve_case', 'Resolve a case (optional comment/fields).', optionalFieldsSchema, handleResolve);
 
 registerTool('reactivate_case', 'Reactivate (reopen) a case (optional comment/fields).', optionalFieldsSchema, handleReactivate);
 registerTool('list_categories', 'List FogBugz categories (ixCategory + metadata).', noopSchema, handleListCategories);
+registerTool('list_areas', 'List FogBugz areas (optionally filtered by project).', listAreasSchema, handleListAreas);
+registerTool('list_custom_fields', 'List custom field names available on a case.', listCustomFieldSchema, handleListCustomFields);
 
 async function start() {
   const transport = new StdioServerTransport();

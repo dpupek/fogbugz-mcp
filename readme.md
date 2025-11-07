@@ -87,6 +87,7 @@ Most tools rely on FogBugz’ search syntax. Highlights:
 - `assignedto:"Tier 2" status:active` filters by owner and status (use quotes for spaces).
 - `project:"NexPort Solutions" opened:"this week"` mixes project filters with date shortcuts.
 - `parent:207291` or `children:207291` retrieves hierarchy relationships.
+- `outline:207291` returns the full descendant tree (what `case_outline` uses under the hood).
 - Use `cols=` to request additional XML columns (comma separated). The MCP server auto-adds safe defaults for each tool.
 For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.help` from Codex for quick reminders.
 
@@ -99,14 +100,17 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `search_cases` | Run arbitrary FogBugz searches. | `q` (required) plus optional `cols`. Used for lightweight listings. |
 | `case_events` | Same as `search_cases` but forces the `events` column so you get the full event log (can be very large). | Ideal when auditing conversations or history. |
 | `view_case` | Fetch one case by ID with optional columns; auto-includes `ixBug`. | Arguments: `ixBug`, optional `cols`. Returns a normalized JSON payload plus raw XML.
-| `create_case` | Create a new FogBugz case. Supports parent/milestone/category and the custom `21_UserStory` field. | Required: `title`, `ixProject`. Optional: `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `21_UserStory`.
-| `edit_case` | Update an existing case. You can change the title, `21_UserStory`, or any FogBugz XML field via the `fields` map. | Required: `ixBug`. Optional: `event`, `fields`, `title`, `21_UserStory`.
+| `create_case` | Create a new FogBugz case. Supports parent/milestone/category and the custom `userStory` text. | Required: `title`, `ixProject`. Optional: `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`.
+| `edit_case` | Update an existing case. You can change the title, `userStory`, or any FogBugz XML field via the `fields` map. | Required: `ixBug`. Optional: `event`, `fields`, `title`, `userStory`.
 | `add_comment` | Add a comment/event to a case. | `ixBug`, `text`. |
 | `attach_file` | Upload an attachment using base64 content. | `ixBug`, `filename`, `contentBase64`. |
 | `list_children` | Return the parent case plus its children (ID, title, assignee, timestamps). | `ixBug` (parent). Handles null IDs by coercing response columns. |
+| `case_outline` | Build the entire descendant tree using FogBugz `outline:<ixBug>` search. | `ixBug` (required) plus optional `cols`. Returns `outline` (root) and `forest` (all top-level branches). |
 | `resolve_case` | Resolve a case with optional closing comment or field edits. | `ixBug`, optional `comment`, `fields`. |
 | `reactivate_case` | Re-open a case with optional comment/field payload. | Same schema as `resolve_case`. |
 | `list_categories` | Enumerate every FogBugz category and metadata (`sCategory`, workflow flags, etc.). | No arguments; handy for validating the `category` you pass to `create_case`. |
+| `list_areas` | List undeleted areas (optionally filtered by project). | `ixProject` optional. Useful before creating cases or editing areas. |
+| `list_custom_fields` | Return the custom-field names configured for a specific case. | `ixBug` required. Helps discover field keys like `plugin_customfields_at_fogcreek_com_*`. |
 
 Example MCP call payload:
 ```json
@@ -117,10 +121,12 @@ Example MCP call payload:
     "ixProject": 27,
     "ixBugParent": 207291,
     "category": "Engineering Task",
-    "21_UserStory": "As a registrar..."
+    "userStory": "As a registrar..."
   }
 }
 ```
+
+*`userStory` maps to the FogBugz custom field `plugin_customfields_at_fogcreek_com_userxstoryh815`, so you don’t need to remember the raw XML name.*
 
 ---
 
@@ -129,6 +135,7 @@ Example MCP call payload:
 - **Full audit trail:** Use `case_events` with `cols="sTitle,events"` to stream every change along with event codes (see FogBugz docs for the code legend).
 - **Create + comment:** After `create_case` returns the new `ixBug`, immediately call `add_comment` to capture additional context while Codex still has it in memory.
 - **Hierarchy review:** `list_children` returns both the parent echo and each child’s `ixBug`, `sTitle`, `sStatus`, `ixPersonAssignedTo`, and `dtLastUpdated`.
+- **Epic outline:** Use `case_outline` to pull the entire descendant tree (parent ➜ children ➜ grandchildren) before planning or bulk edits.
 
 ---
 

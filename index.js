@@ -14,6 +14,7 @@ const FOGBUGZ_TOKEN = process.env.FOGBUGZ_TOKEN || '7m5anarttjnu5o8gokr13hguod9q
 const HELP_DOC_URL = new URL('./docs/fogbugz-help.md', import.meta.url);
 const DEBUG = process.env.FOGBUGZ_MCP_DEBUG === '1';
 const LOG_FILE = process.env.FOGBUGZ_MCP_LOG_FILE;
+const WEB_BASE = (FOGBUGZ_BASE || '').replace(/\/api\.asp.*$/i, '').replace(/\/$/, '');
 
 const DEFAULT_COLS = [
   'ixBug',
@@ -401,6 +402,13 @@ async function handleListCustomFields({ ixBug }) {
   return jsonResult({ ixBug, customFields: Array.from(names), rawCount: names.size });
 }
 
+async function handleCaseLink({ ixBug }) {
+  if (!WEB_BASE) throw new Error('FOGBUGZ_BASE must be set to derive the web link.');
+  const base = WEB_BASE.replace(/\/$/, '');
+  const url = `${base}/f/cases/${ixBug}/`;
+  return jsonResult({ ixBug, url });
+}
+
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
 const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.0' }, { instructions });
 
@@ -486,6 +494,7 @@ registerTool('reactivate_case', 'Reactivate (reopen) a case (optional comment/fi
 registerTool('list_categories', 'List FogBugz categories (ixCategory + metadata).', noopSchema, handleListCategories);
 registerTool('list_areas', 'List FogBugz areas (optionally filtered by project).', listAreasSchema, handleListAreas);
 registerTool('list_custom_fields', 'List custom field names available on a case.', listCustomFieldSchema, handleListCustomFields);
+registerTool('case_link', 'Return the FogBugz web URL for a case.', singleIxBugSchema, handleCaseLink);
 
 async function start() {
   const transport = new StdioServerTransport();

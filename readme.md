@@ -23,6 +23,7 @@ The server runs over the MCP stdio transport via `@modelcontextprotocol/sdk`. Ev
 - Codex configured to load MCP servers from `~/.config/codex/config.toml`.
 
 ### 1. Clone & install
+**macOS/Linux**
 ```bash
 mkdir -p ~/dev && cd ~/dev
 git clone https://github.com/dpupek/fogbugz-mcp.git
@@ -30,7 +31,19 @@ cd fogbugz-mcp
 npm install
 chmod +x index.js
 ```
-Use any workspace path you like; the examples below assume `~/dev/fogbugz-mcp`.
+
+**Windows (PowerShell)**
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\dev" | Out-Null
+Set-Location "$env:USERPROFILE\dev"
+git clone https://github.com/dpupek/fogbugz-mcp.git
+Set-Location fogbugz-mcp
+npm install
+```
+
+Windows doesn’t require `chmod +x`. If you use WSL, follow the Linux steps instead.
+
+Use any workspace path you like; the examples below assume `~/dev/fogbugz-mcp` (or `%USERPROFILE%\dev\fogbugz-mcp` on Windows).
 
 ### 2. Pick the values you will embed in the MCP config
 Codex can pass environment variables directly to the MCP process via the `env = { ... }` block you define in `config.toml`, so you don’t need to `export` them in your shell. Decide on the following values (but keep them out of git/notes):
@@ -111,6 +124,7 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `list_categories` | Enumerate every FogBugz category and metadata (`sCategory`, workflow flags, etc.). | No arguments; handy for validating the `category` you pass to `create_case`. |
 | `list_areas` | List undeleted areas (optionally filtered by project). | `ixProject` optional. Useful before creating cases or editing areas. |
 | `list_custom_fields` | Return the custom-field names configured for a specific case. | `ixBug` required. Helps discover field keys like `plugin_customfields_at_fogcreek_com_*`. |
+| `case_link` | Build the FogBugz web URL a human can click. | `ixBug` required; uses your `FOGBUGZ_BASE` minus `/api.asp` to form `https://.../f/cases/<ixBug>/`. |
 
 Example MCP call payload:
 ```json

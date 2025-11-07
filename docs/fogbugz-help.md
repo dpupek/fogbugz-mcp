@@ -21,6 +21,7 @@
 - `list_categories`: Returns FogBugz categories (`ixCategory`, names, metadata).
 - `list_areas`: Lists undeleted areas; pass `ixProject` to scope the results to a single project.
 - `list_custom_fields`: Returns the custom-field names available on a specific case by querying `plugin_customfield` columns.
+- `case_link`: Returns the human-facing FogBugz URL for a case (`https://<base>/f/cases/<ixBug>/`).
 - Legacy dotted names (e.g., `fogbugz.help`) still work for backward compatibility.
 
 > `userStory` arguments automatically map to the FogBugz custom field `plugin_customfields_at_fogcreek_com_userxstoryh815` so you never need to remember the raw XML name.

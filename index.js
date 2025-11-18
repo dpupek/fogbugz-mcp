@@ -8,10 +8,16 @@ import { request } from 'undici';
 import { parseStringPromise } from 'xml2js';
 import FormData from 'form-data';
 import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const FOGBUGZ_BASE = process.env.FOGBUGZ_BASE || 'https://<YOUR>.fogbugz.com/api.asp';
 const FOGBUGZ_TOKEN = process.env.FOGBUGZ_TOKEN || '7m5anarttjnu5o8gokr13hguod9q68';
-const HELP_DOC_URL = new URL('./docs/fogbugz-help.md', import.meta.url);
+const HELP_DOC_URL = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'docs',
+  'fogbugz-help.md',
+);
 const DEBUG = process.env.FOGBUGZ_MCP_DEBUG === '1';
 const LOG_FILE = process.env.FOGBUGZ_MCP_LOG_FILE;
 const WEB_BASE = (FOGBUGZ_BASE || '').replace(/\/api\.asp.*$/i, '').replace(/\/$/, '');

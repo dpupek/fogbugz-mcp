@@ -63,6 +63,9 @@ description = "FogBugz MCP server (search/view/create/edit/comment/attach/childr
 env = {  "FOGBUGZ_BASE" = "https://example.fogbugz.com/api.asp",   "FOGBUGZ_TOKEN" = "paste-your-token-here",   "FOGBUGZ_MCP_LOG_FILE" = "/tmp/fogbugz-mcp.log",  "FOGBUGZ_MCP_DEBUG" = "1"}
 ```
 - This installs and runs the CLI straight from GitHub; no local path required.
+- To pin to a tag (recommended for stability), suffix the repo with `#<tag>`, for example:
+  - `github:dpupek/fogbugz-mcp#v1.0.0`
+  - `github:dpupek/fogbugz-mcp#latest-release`
 - Codex injects these env vars when it launches the server, so there is no need to export them globally; treat this block like a private secrets store.
 - If Codex reports a handshake timeout, raise `startup_timeout_sec` slightly to give Node more time to boot.
 - env property must have no line breaks.

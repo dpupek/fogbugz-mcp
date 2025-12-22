@@ -418,10 +418,10 @@ async function handleCaseLink({ ixBug }) {
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
 const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.0' }, { instructions });
 
-const noopSchema = z.object({});
-const searchSchema = z.object({ q: z.string(), cols: z.string().optional() });
-const viewSchema = z.object({ ixBug: z.number().int(), cols: z.string().optional() });
-const createSchema = z.object({
+const noopSchema = {};
+const searchSchema = { q: z.string(), cols: z.string().optional() };
+const viewSchema = { ixBug: z.number().int(), cols: z.string().optional() };
+const createSchema = {
   title: z.string(),
   event: z.string().optional(),
   ixProject: z.number().int(),
@@ -432,33 +432,33 @@ const createSchema = z.object({
   category: z.union([z.string(), z.number()]).optional(),
   userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
-});
-const editSchema = z.object({
+};
+const editSchema = {
   ixBug: z.number().int(),
   event: z.string().optional(),
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
   title: z.string().optional(),
   userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
-});
-const commentSchema = z.object({ ixBug: z.number().int(), text: z.string() });
-const attachSchema = z.object({ ixBug: z.number().int(), filename: z.string(), contentBase64: z.string() });
-const singleIxBugSchema = z.object({ ixBug: z.number().int() });
-const optionalFieldsSchema = z.object({
+};
+const commentSchema = { ixBug: z.number().int(), text: z.string() };
+const attachSchema = { ixBug: z.number().int(), filename: z.string(), contentBase64: z.string() };
+const singleIxBugSchema = { ixBug: z.number().int() };
+const optionalFieldsSchema = {
   ixBug: z.number().int(),
   comment: z.string().optional(),
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
-});
-const listAreasSchema = z.object({ ixProject: z.number().int().optional() });
-const listCustomFieldSchema = z.object({ ixBug: z.number().int() });
+};
+const listAreasSchema = { ixProject: z.number().int().optional() };
+const listCustomFieldSchema = { ixBug: z.number().int() };
 
-function registerTool(name, description, schema, handler) {
+function registerTool(name, description, schemaShape, handler) {
   mcpServer.registerTool(
     name,
     {
       title: name,
       description,
-      inputSchema: schema,
+      inputSchema: schemaShape,
     },
     async (args) => handler(args),
   );

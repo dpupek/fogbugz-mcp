@@ -22,28 +22,10 @@ The server runs over the MCP stdio transport via `@modelcontextprotocol/sdk`. Ev
 - A FogBugz account with access to the projects you plan to touch.
 - Codex configured to load MCP servers from `~/.config/codex/config.toml`.
 
-### 1. Clone & install
-**macOS/Linux**
-```bash
-mkdir -p ~/dev && cd ~/dev
-git clone https://github.com/dpupek/fogbugz-mcp.git
-cd fogbugz-mcp
-npm install
-chmod +x index.js
-```
+### 1. Recommended: run via `npx` (no clone required)
+This is the simplest setup and the recommended approach for Codex. You do **not** need to clone the repo locally.
 
-**Windows (PowerShell)**
-```powershell
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\dev" | Out-Null
-Set-Location "$env:USERPROFILE\dev"
-git clone https://github.com/dpupek/fogbugz-mcp.git
-Set-Location fogbugz-mcp
-npm install
-```
-
-Windows doesn’t require `chmod +x`. If you use WSL, follow the Linux steps instead.
-
-Use any workspace path you like; the examples below assume `~/dev/fogbugz-mcp` (or `%USERPROFILE%\dev\fogbugz-mcp` on Windows).
+If you prefer a local clone for development, see the “Local development setup” section below.
 
 ### 2. Pick the values you will embed in the MCP config
 Codex can pass environment variables directly to the MCP process via the `env = { ... }` block you define in `config.toml`, so you don’t need to `export` them in your shell. Decide on the following values (but keep them out of git/notes):
@@ -66,13 +48,13 @@ Because these values end up in `config.toml`, keep that file outside version con
 
 Why the fuss? FogBugz tokens grant the same rights as your account—treat them like passwords, rotate them when someone leaves the team, and never paste them into support tickets or commit history.
 
-### 4. Wire the server into Codex
+### 4. Wire the server into Codex (recommended `npx` config)
 Edit `~/.config/codex/config.toml` (create the file if it does not exist) and add:
 ```toml
 [mcp_servers.fogbugz]
 type = "stdio"
-command = "node"
-args = ["/home/<you>/dev/fogbugz-mcp/index.js"]
+command = "npx"
+args = ["--yes", "-p", "github:dpupek/fogbugz-mcp", "fogbugz-mcp"]
 startup_timeout_sec = 15
 shutdown_timeout_sec = 5
 tool_timeout_sec = 60
@@ -80,10 +62,39 @@ description = "FogBugz MCP server (search/view/create/edit/comment/attach/childr
 
 env = {  "FOGBUGZ_BASE" = "https://example.fogbugz.com/api.asp",   "FOGBUGZ_TOKEN" = "paste-your-token-here",   "FOGBUGZ_MCP_LOG_FILE" = "/tmp/fogbugz-mcp.log",  "FOGBUGZ_MCP_DEBUG" = "1"}
 ```
-- Keep the `args` path in sync with wherever you cloned the repo.
+- This installs and runs the CLI straight from GitHub; no local path required.
 - Codex injects these env vars when it launches the server, so there is no need to export them globally; treat this block like a private secrets store.
 - If Codex reports a handshake timeout, raise `startup_timeout_sec` slightly to give Node more time to boot.
 - env property must have no line breaks.
+
+### Local development setup (optional)
+If you want to hack on the server locally:
+
+**macOS/Linux**
+```bash
+mkdir -p ~/dev && cd ~/dev
+git clone https://github.com/dpupek/fogbugz-mcp.git
+cd fogbugz-mcp
+npm install
+chmod +x index.js
+```
+
+**Windows (PowerShell)**
+```powershell
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\dev" | Out-Null
+Set-Location "$env:USERPROFILE\dev"
+git clone https://github.com/dpupek/fogbugz-mcp.git
+Set-Location fogbugz-mcp
+npm install
+```
+
+Windows doesn’t require `chmod +x`. If you use WSL, follow the Linux steps instead.
+
+When running from a local clone, use:
+```toml
+command = "node"
+args = ["/home/<you>/dev/fogbugz-mcp/index.js"]
+```
 
 ### 5. Smoke test the transport
 You can sanity-check the MCP handshake without Codex:

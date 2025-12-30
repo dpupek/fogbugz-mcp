@@ -71,6 +71,10 @@
   1. Call `search_cases` (or `case_events` if you need history) with `q="status:active fixfor:\"Milestone Name\""`.  
   2. Optionally add columns (`cols="ixBug,sTitle,sPersonAssignedTo"`) to tailor the response.  
   3. Iterate the returned cases or feed them into follow-up tools (`view_case`, `add_comment`, etc.).
+- **Bulk edits (by iterating individual calls)**  
+  1. Use `search_cases` to collect the target `ixBug` values.  
+  2. Call `edit_case`, `resolve_case`, `add_comment`, etc. once per case.  
+  3. Throttle your loop (small batches or pauses) to avoid overloading the FogBugz server.
 - **Get details for every descendant case**  
   1. Run `case_outline` with `ixBug=<epic-id>`; the result contains `outline` (root) and `forest` (all top-level branches).  
   2. Traverse the `children` arrays directly, or for richer fields call `view_case` on each `ixBug`.  

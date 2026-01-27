@@ -124,6 +124,8 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | Tool | Purpose | Key arguments & notes |
 | --- | --- | --- |
 | `help` | Returns the markdown help/recipes that ships with the server. | No arguments. Useful when Codex needs onboarding text. |
+| `version` | Return the MCP server name + version. | No arguments. |
+| `health` | Check configuration and FogBugz API connectivity. | No arguments. |
 | `search_cases` | Run arbitrary FogBugz searches. | `q` (required) plus optional `cols`. Used for lightweight listings. |
 | `case_events` | Same as `search_cases` but forces the `events` column so you get the full event log (can be very large). | Ideal when auditing conversations or history. |
 | `view_case` | Fetch one case by ID with optional columns; auto-includes `ixBug`. | Arguments: `ixBug`, optional `cols`. Returns a normalized JSON payload plus raw XML.
@@ -137,6 +139,16 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `reactivate_case` | Re-open a case with optional comment/field payload. | Same schema as `resolve_case`. |
 | `list_categories` | Enumerate every FogBugz category and metadata (`sCategory`, workflow flags, etc.). | No arguments; handy for validating the `category` you pass to `create_case`. |
 | `list_areas` | List undeleted areas (optionally filtered by project). | `ixProject` optional. Useful before creating cases or editing areas. |
+| `list_status` | List FogBugz statuses (optionally filtered by category/resolved state). | Optional: `ixCategory`, `fResolved`. |
+| `view_status` | View a specific FogBugz status. | Provide `ixStatus`, or `sStatus` + `ixCategory`. |
+| `list_milestones` | List milestones (FixFors), optionally filtered by project. | Optional: `ixProject`. |
+| `view_milestone` | View a specific milestone (FixFor). | Required: `ixFixFor`. |
+| `create_milestone` | Create a new milestone (FixFor). | Required: `ixProject`, `sFixFor`. Optional: `dtStart`, `dtEnd`. |
+| `edit_milestone` | Edit an existing milestone (FixFor). | Required: `ixFixFor`. Optional: `ixProject`, `sFixFor`, `dtStart`, `dtEnd`, `fAssignable`, `fDeleted`, `confirmDelete` (required when deleting). |
+| `add_milestone_dependency` | Add a dependency between milestones (FixFors). | Required: `ixFixFor`, `ixFixForDependsOn`. |
+| `remove_milestone_dependency` | Remove a dependency between milestones (FixFors). | Required: `ixFixFor`, `ixFixForDependsOn`. |
+| `create_area` | Create a new area in a project. | Required: `ixProject`, `sArea`. Optional: `ixPersonPrimaryContact`. |
+| `edit_area` | Edit an existing area. | Required: `ixArea`. Optional: `sArea`, `ixProject`, `ixPersonPrimaryContact`. |
 | `list_custom_fields` | Return the custom-field names configured for a specific case. | `ixBug` required. Helps discover field keys like `plugin_customfields_at_fogcreek_com_*`. |
 | `case_link` | Build the FogBugz web URL a human can click. | `ixBug` required; uses your `FOGBUGZ_BASE` minus `/api.asp` to form `https://.../f/cases/<ixBug>/`. |
 

@@ -21,6 +21,7 @@ const HELP_DOC_URL = path.join(
 const DEBUG = process.env.FOGBUGZ_MCP_DEBUG === '1';
 const LOG_FILE = process.env.FOGBUGZ_MCP_LOG_FILE;
 const WEB_BASE = (FOGBUGZ_BASE || '').replace(/\/api\.asp.*$/i, '').replace(/\/$/, '');
+const PACKAGE_JSON_URL = new URL('./package.json', import.meta.url);
 
 const DEFAULT_COLS = [
   'ixBug',
@@ -137,6 +138,40 @@ function normalizeIxBug(value, fallback) {
   return Number.isNaN(num) ? fallback ?? null : num;
 }
 
+function normalizeId(value, fallback) {
+  if (Array.isArray(value)) return Number(value[0] ?? fallback ?? null);
+  if (value === undefined || value === null) return fallback ?? null;
+  const num = Number(value);
+  return Number.isNaN(num) ? fallback ?? null : num;
+}
+
+function isBlank(value) {
+  return value === undefined || value === null || String(value).trim() === '';
+}
+
+function isIsoDateLike(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return true;
+  if (/^\d{4}-\d{2}-\d{2}T/.test(trimmed)) return true;
+  return false;
+}
+
+function parseDateOrThrow(value, fieldName) {
+  if (!isIsoDateLike(value)) {
+    throw new Error(
+      `${fieldName} must be an ISO 8601 date (YYYY-MM-DD) or datetime (YYYY-MM-DDTHH:MM:SSZ). ` +
+        `Received: "${value}".`,
+    );
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new Error(`${fieldName} could not be parsed as a valid date. Received: "${value}".`);
+  }
+  return parsed;
+}
+
 function jsonResult(data) {
   return {
     content: [
@@ -147,6 +182,19 @@ function jsonResult(data) {
       },
     ],
   };
+}
+
+function loadPackageVersion() {
+  try {
+    const raw = fs.readFileSync(PACKAGE_JSON_URL, 'utf8');
+    const pkg = JSON.parse(raw);
+    return {
+      name: pkg?.name ?? 'fogbugz-mcp',
+      version: pkg?.version ?? 'unknown',
+    };
+  } catch (err) {
+    return { name: 'fogbugz-mcp', version: 'unknown', error: err?.message };
+  }
 }
 
 function columnsWithDefaults(cols) {
@@ -375,6 +423,229 @@ async function handleListAreas({ ixProject }) {
   return jsonResult({ areas: normalized, raw: resp });
 }
 
+async function handleListStatus({ ixCategory, fResolved }) {
+  const payload = {
+    cmd: 'listStatus',
+    ...(ixCategory ? { ixCategory: String(ixCategory) } : {}),
+    ...(fResolved !== undefined ? { fResolved: fResolved ? '1' : '0' } : {}),
+  };
+  const resp = await fbCall(payload);
+  let list = resp?.statuses?.status || [];
+  if (!Array.isArray(list)) list = list ? [list] : [];
+  const normalized = list.map((status) => ({
+    ...status,
+    ixStatus: normalizeId(status.ixStatus, null),
+    ixCategory: status.ixCategory !== undefined ? normalizeId(status.ixCategory, null) : undefined,
+  }));
+  return jsonResult({ statuses: normalized, raw: resp });
+}
+
+async function handleViewStatus({ ixStatus, sStatus, ixCategory }) {
+  if (ixStatus && (sStatus || ixCategory)) {
+    throw new Error('view_status: provide either ixStatus OR (sStatus + ixCategory), not both.');
+  }
+  if (!ixStatus && !(sStatus && ixCategory)) {
+    throw new Error('view_status requires ixStatus or (sStatus and ixCategory).');
+  }
+  const payload = {
+    cmd: 'viewStatus',
+    ...(ixStatus ? { ixStatus: String(ixStatus) } : {}),
+    ...(sStatus ? { sStatus } : {}),
+    ...(ixCategory ? { ixCategory: String(ixCategory) } : {}),
+  };
+  const resp = await fbCall(payload);
+  const status = resp?.status
+    ? {
+        ...resp.status,
+        ixStatus: normalizeId(resp.status?.ixStatus, ixStatus ?? null),
+        ixCategory: resp.status?.ixCategory !== undefined ? normalizeId(resp.status?.ixCategory, ixCategory ?? null) : undefined,
+      }
+    : null;
+  return jsonResult({ status, raw: resp });
+}
+
+async function handleListMilestones({ ixProject }) {
+  if (ixProject !== undefined && ixProject <= 0) {
+    throw new Error('list_milestones: ixProject must be a positive integer when provided.');
+  }
+  const payload = { cmd: 'listFixFors', ...(ixProject ? { ixProject: String(ixProject) } : {}) };
+  const resp = await fbCall(payload);
+  let list = resp?.fixfors?.fixfor || [];
+  if (!Array.isArray(list)) list = list ? [list] : [];
+  const normalized = list.map((fixfor) => ({
+    ...fixfor,
+    ixFixFor: normalizeId(fixfor.ixFixFor, null),
+    ixProject: fixfor.ixProject !== undefined ? normalizeId(fixfor.ixProject, null) : undefined,
+  }));
+  return jsonResult({ milestones: normalized, raw: resp });
+}
+
+async function handleViewMilestone({ ixFixFor }) {
+  const resp = await fbCall({ cmd: 'viewFixFor', ixFixFor: String(ixFixFor) });
+  const fixfor = resp?.fixfor
+    ? {
+        ...resp.fixfor,
+        ixFixFor: normalizeId(resp.fixfor?.ixFixFor, ixFixFor),
+        ixProject: resp.fixfor?.ixProject !== undefined ? normalizeId(resp.fixfor?.ixProject, null) : undefined,
+      }
+    : null;
+  return jsonResult({ milestone: fixfor, raw: resp });
+}
+
+async function handleCreateMilestone({ ixProject, sFixFor, dtStart, dtEnd }) {
+  if (ixProject <= 0) {
+    throw new Error('create_milestone: ixProject must be a positive integer.');
+  }
+  if (isBlank(sFixFor)) {
+    throw new Error('create_milestone: sFixFor (milestone name) cannot be blank.');
+  }
+  if (dtStart !== undefined && isBlank(dtStart)) {
+    throw new Error('create_milestone: dtStart cannot be blank when provided.');
+  }
+  if (dtEnd !== undefined && isBlank(dtEnd)) {
+    throw new Error('create_milestone: dtEnd cannot be blank when provided.');
+  }
+  const startMs = dtStart ? parseDateOrThrow(dtStart, 'dtStart') : null;
+  const endMs = dtEnd ? parseDateOrThrow(dtEnd, 'dtEnd') : null;
+  if (startMs !== null && endMs !== null && endMs < startMs) {
+    throw new Error('create_milestone: dtEnd must be the same day or after dtStart.');
+  }
+  const payload = {
+    cmd: 'newFixFor',
+    ixProject: String(ixProject),
+    sFixFor,
+    ...(dtStart ? { dtStart } : {}),
+    ...(dtEnd ? { dtEnd } : {}),
+  };
+  const resp = await fbCall(payload);
+  const ixFixFor = normalizeId(resp?.fixfor?.ixFixFor ?? resp?.ixFixFor, null);
+  return jsonResult({ ixFixFor, raw: resp });
+}
+
+async function handleEditMilestone({
+  ixFixFor,
+  ixProject,
+  sFixFor,
+  dtStart,
+  dtEnd,
+  fAssignable,
+  fDeleted,
+  confirmDelete,
+}) {
+  const hasEdit =
+    ixProject !== undefined ||
+    sFixFor !== undefined ||
+    dtStart !== undefined ||
+    dtEnd !== undefined ||
+    fAssignable !== undefined ||
+    fDeleted !== undefined;
+  if (!hasEdit) {
+    throw new Error(
+      'edit_milestone requires at least one field to update (ixProject, sFixFor, dtStart, dtEnd, fAssignable, fDeleted).',
+    );
+  }
+  if (fDeleted === true && confirmDelete !== true) {
+    throw new Error(
+      'edit_milestone: set confirmDelete=true to delete a milestone (fDeleted=true). This prevents accidental deletes.',
+    );
+  }
+  if (ixProject !== undefined && ixProject <= 0) {
+    throw new Error('edit_milestone: ixProject must be a positive integer when provided.');
+  }
+  if (sFixFor !== undefined && isBlank(sFixFor)) {
+    throw new Error('edit_milestone: sFixFor cannot be blank when provided.');
+  }
+  if (dtStart !== undefined && isBlank(dtStart)) {
+    throw new Error('edit_milestone: dtStart cannot be blank when provided.');
+  }
+  if (dtEnd !== undefined && isBlank(dtEnd)) {
+    throw new Error('edit_milestone: dtEnd cannot be blank when provided.');
+  }
+  const startMs = dtStart ? parseDateOrThrow(dtStart, 'dtStart') : null;
+  const endMs = dtEnd ? parseDateOrThrow(dtEnd, 'dtEnd') : null;
+  if (startMs !== null && endMs !== null && endMs < startMs) {
+    throw new Error('edit_milestone: dtEnd must be the same day or after dtStart.');
+  }
+  const payload = {
+    cmd: 'editFixFor',
+    ixFixFor: String(ixFixFor),
+    ...(ixProject ? { ixProject: String(ixProject) } : {}),
+    ...(sFixFor ? { sFixFor } : {}),
+    ...(dtStart ? { dtStart } : {}),
+    ...(dtEnd ? { dtEnd } : {}),
+    ...(fAssignable !== undefined ? { fAssignable: fAssignable ? '1' : '0' } : {}),
+    ...(fDeleted !== undefined ? { fDeleted: fDeleted ? '1' : '0' } : {}),
+  };
+  const resp = await fbCall(payload);
+  return jsonResult(resp);
+}
+
+async function handleAddMilestoneDependency({ ixFixFor, ixFixForDependsOn }) {
+  if (ixFixFor === ixFixForDependsOn) {
+    throw new Error('add_milestone_dependency: ixFixFor and ixFixForDependsOn must be different milestones.');
+  }
+  const resp = await fbCall({
+    cmd: 'addFixForDependency',
+    ixFixFor: String(ixFixFor),
+    ixFixForDependsOn: String(ixFixForDependsOn),
+  });
+  return jsonResult(resp);
+}
+
+async function handleRemoveMilestoneDependency({ ixFixFor, ixFixForDependsOn }) {
+  if (ixFixFor === ixFixForDependsOn) {
+    throw new Error('remove_milestone_dependency: ixFixFor and ixFixForDependsOn must be different milestones.');
+  }
+  const resp = await fbCall({
+    cmd: 'deleteFixForDependency',
+    ixFixFor: String(ixFixFor),
+    ixFixForDependsOn: String(ixFixForDependsOn),
+  });
+  return jsonResult(resp);
+}
+
+async function handleCreateArea({ ixProject, sArea, ixPersonPrimaryContact }) {
+  if (ixProject <= 0) {
+    throw new Error('create_area: ixProject must be a positive integer.');
+  }
+  if (isBlank(sArea)) {
+    throw new Error('create_area: sArea (area name) cannot be blank.');
+  }
+  const payload = {
+    cmd: 'newArea',
+    ixProject: String(ixProject),
+    sArea,
+    ...(ixPersonPrimaryContact !== undefined ? { ixPersonPrimaryContact: String(ixPersonPrimaryContact) } : {}),
+  };
+  const resp = await fbCall(payload);
+  const ixArea = normalizeId(resp?.area?.ixArea ?? resp?.ixArea, null);
+  return jsonResult({ ixArea, raw: resp });
+}
+
+async function handleEditArea({ ixArea, sArea, ixProject, ixPersonPrimaryContact }) {
+  const hasEdit = sArea !== undefined || ixProject !== undefined || ixPersonPrimaryContact !== undefined;
+  if (!hasEdit) {
+    throw new Error(
+      'edit_area requires at least one field to update (sArea, ixProject, ixPersonPrimaryContact).',
+    );
+  }
+  if (sArea !== undefined && isBlank(sArea)) {
+    throw new Error('edit_area: sArea cannot be blank when provided.');
+  }
+  if (ixProject !== undefined && ixProject <= 0) {
+    throw new Error('edit_area: ixProject must be a positive integer when provided.');
+  }
+  const payload = {
+    cmd: 'editArea',
+    ixArea: String(ixArea),
+    ...(sArea ? { sArea } : {}),
+    ...(ixProject ? { ixProject: String(ixProject) } : {}),
+    ...(ixPersonPrimaryContact !== undefined ? { ixPersonPrimaryContact: String(ixPersonPrimaryContact) } : {}),
+  };
+  const resp = await fbCall(payload);
+  return jsonResult(resp);
+}
+
 function collectCustomFieldNames(source, bucket) {
   if (!source) return;
   if (Array.isArray(source)) {
@@ -415,8 +686,56 @@ async function handleCaseLink({ ixBug }) {
   return jsonResult({ ixBug, url });
 }
 
+async function handleVersion() {
+  const pkg = loadPackageVersion();
+  return jsonResult({ name: pkg.name, version: pkg.version });
+}
+
+async function handleHealth() {
+  const warnings = [];
+  const baseEnv = process.env.FOGBUGZ_BASE;
+  const tokenEnv = process.env.FOGBUGZ_TOKEN;
+
+  if (!baseEnv) warnings.push('FOGBUGZ_BASE is not set.');
+  if (!tokenEnv) warnings.push('FOGBUGZ_TOKEN is not set.');
+  if (FOGBUGZ_BASE.includes('<YOUR>')) warnings.push('FOGBUGZ_BASE is still using the placeholder value.');
+  if (tokenEnv && tokenEnv.trim().length < 10) warnings.push('FOGBUGZ_TOKEN looks too short; check the value.');
+
+  if (warnings.length > 0) {
+    return jsonResult({
+      ok: false,
+      warnings,
+      hint: 'Set FOGBUGZ_BASE/FOGBUGZ_TOKEN in your environment and restart the MCP server.',
+    });
+  }
+
+  try {
+    const started = Date.now();
+    const resp = await fbCall({ cmd: 'listCategories' });
+    const elapsedMs = Date.now() - started;
+    const count = resp?.categories?.category
+      ? Array.isArray(resp.categories.category)
+        ? resp.categories.category.length
+        : 1
+      : 0;
+
+    return jsonResult({
+      ok: true,
+      api: 'listCategories',
+      categories: count,
+      elapsedMs,
+    });
+  } catch (err) {
+    return jsonResult({
+      ok: false,
+      error: err?.message || 'Unknown error while contacting FogBugz.',
+      hint: 'Network unavailable or FogBugz API unreachable. Check connectivity and try again.',
+    });
+  }
+}
+
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
-const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.0' }, { instructions });
+const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.1' }, { instructions });
 
 const noopSchema = {};
 const searchSchema = { q: z.string(), cols: z.string().optional() };
@@ -450,6 +769,48 @@ const optionalFieldsSchema = {
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
 };
 const listAreasSchema = { ixProject: z.number().int().optional() };
+const listStatusSchema = {
+  ixCategory: z.number().int().optional(),
+  fResolved: z.boolean().optional(),
+};
+const viewStatusSchema = {
+  ixStatus: z.number().int().optional(),
+  sStatus: z.string().optional(),
+  ixCategory: z.number().int().optional(),
+};
+const listMilestonesSchema = { ixProject: z.number().int().optional() };
+const viewMilestoneSchema = { ixFixFor: z.number().int() };
+const createMilestoneSchema = {
+  ixProject: z.number().int(),
+  sFixFor: z.string(),
+  dtStart: z.string().optional(),
+  dtEnd: z.string().optional(),
+};
+const editMilestoneSchema = {
+  ixFixFor: z.number().int(),
+  ixProject: z.number().int().optional(),
+  sFixFor: z.string().optional(),
+  dtStart: z.string().optional(),
+  dtEnd: z.string().optional(),
+  fAssignable: z.boolean().optional(),
+  fDeleted: z.boolean().optional(),
+  confirmDelete: z.boolean().optional(),
+};
+const milestoneDependencySchema = {
+  ixFixFor: z.number().int(),
+  ixFixForDependsOn: z.number().int(),
+};
+const createAreaSchema = {
+  ixProject: z.number().int(),
+  sArea: z.string(),
+  ixPersonPrimaryContact: z.number().int().optional(),
+};
+const editAreaSchema = {
+  ixArea: z.number().int(),
+  sArea: z.string().optional(),
+  ixProject: z.number().int().optional(),
+  ixPersonPrimaryContact: z.number().int().optional(),
+};
 const listCustomFieldSchema = { ixBug: z.number().int() };
 
 function registerTool(name, description, schemaShape, handler) {
@@ -472,6 +833,8 @@ mcpServer.resource(
 );
 
 registerTool('help', 'Explain how to configure and use the FogBugz MCP tools.', noopSchema, async () => jsonResult(loadHelpMarkdown()));
+registerTool('version', 'Return the FogBugz MCP server version.', noopSchema, handleVersion);
+registerTool('health', 'Check FogBugz MCP configuration and API connectivity.', noopSchema, handleHealth);
 
 registerTool('search_cases', 'Search FogBugz cases (q supports FogBugz query syntax).', searchSchema, handleSearchCases);
 registerTool(
@@ -499,6 +862,41 @@ registerTool('resolve_case', 'Resolve a case (optional comment/fields).', option
 registerTool('reactivate_case', 'Reactivate (reopen) a case (optional comment/fields).', optionalFieldsSchema, handleReactivate);
 registerTool('list_categories', 'List FogBugz categories (ixCategory + metadata).', noopSchema, handleListCategories);
 registerTool('list_areas', 'List FogBugz areas (optionally filtered by project).', listAreasSchema, handleListAreas);
+registerTool(
+  'list_status',
+  'List FogBugz statuses (optionally filtered by category or resolved state).',
+  listStatusSchema,
+  handleListStatus,
+);
+registerTool(
+  'view_status',
+  'View a specific status (ixStatus or sStatus + ixCategory).',
+  viewStatusSchema,
+  handleViewStatus,
+);
+registerTool(
+  'list_milestones',
+  'List FogBugz milestones (FixFors), optionally filtered by project.',
+  listMilestonesSchema,
+  handleListMilestones,
+);
+registerTool('view_milestone', 'View a specific milestone (FixFor).', viewMilestoneSchema, handleViewMilestone);
+registerTool('create_milestone', 'Create a new milestone (FixFor).', createMilestoneSchema, handleCreateMilestone);
+registerTool('edit_milestone', 'Edit an existing milestone (FixFor).', editMilestoneSchema, handleEditMilestone);
+registerTool(
+  'add_milestone_dependency',
+  'Add a dependency between two milestones (FixFors).',
+  milestoneDependencySchema,
+  handleAddMilestoneDependency,
+);
+registerTool(
+  'remove_milestone_dependency',
+  'Remove a dependency between two milestones (FixFors).',
+  milestoneDependencySchema,
+  handleRemoveMilestoneDependency,
+);
+registerTool('create_area', 'Create a new FogBugz area.', createAreaSchema, handleCreateArea);
+registerTool('edit_area', 'Edit an existing FogBugz area.', editAreaSchema, handleEditArea);
 registerTool('list_custom_fields', 'List custom field names available on a case.', listCustomFieldSchema, handleListCustomFields);
 registerTool('case_link', 'Return the FogBugz web URL for a case.', singleIxBugSchema, handleCaseLink);
 

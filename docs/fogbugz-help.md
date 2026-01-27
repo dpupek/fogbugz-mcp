@@ -7,6 +7,8 @@
 
 ## Available Tools
 - `help`: Returns this guidance document.
+- `version`: Returns the MCP server name + version.
+- `health`: Checks configuration and verifies FogBugz API connectivity.
 - `search_cases`: Run FogBugz query syntax searches. Optional `cols` controls returned columns (comma-separated XML column names).
 - `case_events`: Same as `search_cases` but always includes the `events` column (can be very large). Event code reference: https://support.fogbugz.com/article/55756-fogbugz-xml-api-event-codes
 - `view_case`: Fetch a specific case with optional `cols`.
@@ -20,6 +22,16 @@
 - `reactivate_case`: Reopens a case and optionally posts a comment or extra fields.
 - `list_categories`: Returns FogBugz categories (`ixCategory`, names, metadata).
 - `list_areas`: Lists undeleted areas; pass `ixProject` to scope the results to a single project.
+- `list_status`: Lists statuses; optionally filter by `ixCategory` and/or `fResolved`.
+- `view_status`: Views a status by `ixStatus` (or by `sStatus` + `ixCategory`).
+- `list_milestones`: Lists milestones (FixFors); pass `ixProject` to scope to a project.
+- `view_milestone`: Views a milestone by `ixFixFor`.
+- `create_milestone`: Creates a milestone (`ixProject`, `sFixFor` required; optional `dtStart`, `dtEnd`).
+- `edit_milestone`: Updates a milestone (`ixFixFor` required; optional `ixProject`, `sFixFor`, `dtStart`, `dtEnd`, `fAssignable`, `fDeleted`, `confirmDelete`). Set `confirmDelete=true` when `fDeleted=true`.
+- `add_milestone_dependency`: Adds a dependency between milestones (`ixFixFor`, `ixFixForDependsOn`).
+- `remove_milestone_dependency`: Removes a dependency between milestones (`ixFixFor`, `ixFixForDependsOn`).
+- `create_area`: Creates a new area (`ixProject`, `sArea` required; optional `ixPersonPrimaryContact`).
+- `edit_area`: Updates an existing area (`ixArea` required; optional `sArea`, `ixProject`, `ixPersonPrimaryContact`).
 - `list_custom_fields`: Returns the custom-field names available on a specific case by querying `plugin_customfield` columns.
 - `case_link`: Returns the human-facing FogBugz URL for a case (`https://<base>/f/cases/<ixBug>/`).
 - Legacy dotted names (e.g., `fogbugz.help`) still work for backward compatibility.

@@ -28,6 +28,7 @@
 - `list_areas` – List undeleted areas, optionally filtered by `ixProject` via `cmd=listAreas`.
 - `list_custom_fields` – Discover custom-field names on a case by running a `search` with `cols=plugin_customfield`.
 - `case_link` – Produce the human-facing FogBugz URL for a case using the base URL (e.g., `https://example.fogbugz.com/f/cases/<ixBug>/`).
+- `search_users` – Search people via cached `listPeople` results with in-memory contains matching (`query`, optional `forceRefresh`).
 - `add_comment` – Add a comment (`ixBug`, `text`).
 - `attach_file` – Attach base64 file body (`ixBug`, `filename`, `contentBase64`).
 - `list_children` – List child cases of a parent (`ixBug`). Uses `view` first, falls back to `search parent:<id>`.

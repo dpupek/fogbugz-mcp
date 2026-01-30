@@ -37,6 +37,13 @@ const DEFAULT_COLS = [
   'plugin_customfields_at_fogcreek_com_userxstoryh815',
 ];
 const USER_STORY_FIELD = 'plugin_customfields_at_fogcreek_com_userxstoryh815';
+const PEOPLE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let peopleCache = {
+  asof: null,
+  expiresAt: 0,
+  people: null,
+};
 
 function logDebug(...args) {
   if (!DEBUG && !LOG_FILE) return;
@@ -182,6 +189,68 @@ function jsonResult(data) {
       },
     ],
   };
+}
+
+function normalizePeopleList(list) {
+  if (!Array.isArray(list)) return list ? [list] : [];
+  return list;
+}
+
+function formatCacheTimestamp(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function matchesPerson(person, needle) {
+  if (!needle) return true;
+  const haystackFields = [
+    person?.sFullName,
+    person?.sEmail,
+    person?.sName,
+    person?.sPerson,
+    person?.sFirstName,
+    person?.sLastName,
+    person?.sUsername,
+    person?.sLogin,
+  ]
+    .filter((value) => value !== undefined && value !== null)
+    .map((value) => String(value).toLowerCase());
+
+  return haystackFields.some((value) => value.includes(needle));
+}
+
+async function listPeopleCached({ forceRefresh }) {
+  const now = Date.now();
+  if (!forceRefresh && peopleCache.people && peopleCache.expiresAt > now) {
+    return {
+      people: peopleCache.people,
+      asof: peopleCache.asof,
+      expiresAt: peopleCache.expiresAt,
+      fromCache: true,
+    };
+  }
+
+  if (forceRefresh) {
+    peopleCache = { asof: null, expiresAt: 0, people: null };
+  }
+
+  const resp = await fbCall({ cmd: 'listPeople' });
+  const list = normalizePeopleList(resp?.people?.person);
+  const normalized = list.map((person) => ({
+    ...person,
+    ixPerson: normalizeId(person?.ixPerson, null),
+  }));
+  const asof = new Date().toISOString();
+  const expiresAt = Date.now() + PEOPLE_CACHE_TTL_MS;
+
+  peopleCache = {
+    asof,
+    expiresAt,
+    people: normalized,
+  };
+
+  return { people: normalized, asof, expiresAt, fromCache: false };
 }
 
 function loadPackageVersion() {
@@ -686,6 +755,32 @@ async function handleCaseLink({ ixBug }) {
   return jsonResult({ ixBug, url });
 }
 
+async function handleSearchUsers({ query, forceRefresh }) {
+  if (query !== undefined && isBlank(query)) {
+    throw new Error('search_users: query cannot be blank when provided.');
+  }
+
+  const { people, asof, expiresAt, fromCache } = await listPeopleCached({ forceRefresh });
+  const needle = query ? String(query).trim().toLowerCase() : '';
+  const matches = needle ? people.filter((person) => matchesPerson(person, needle)) : people;
+
+  return jsonResult({
+    query: query ?? null,
+    match: needle ? 'contains' : 'all',
+    asof,
+    cache: {
+      asof,
+      expiresAt: formatCacheTimestamp(expiresAt),
+      ttlSeconds: Math.floor(PEOPLE_CACHE_TTL_MS / 1000),
+      fromCache,
+      forcedRefresh: Boolean(forceRefresh),
+    },
+    count: matches.length,
+    total: people.length,
+    people: matches,
+  });
+}
+
 async function handleVersion() {
   const pkg = loadPackageVersion();
   return jsonResult({ name: pkg.name, version: pkg.version });
@@ -735,7 +830,7 @@ async function handleHealth() {
 }
 
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
-const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.1' }, { instructions });
+const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.2' }, { instructions });
 
 const noopSchema = {};
 const searchSchema = { q: z.string(), cols: z.string().optional() };
@@ -812,6 +907,10 @@ const editAreaSchema = {
   ixPersonPrimaryContact: z.number().int().optional(),
 };
 const listCustomFieldSchema = { ixBug: z.number().int() };
+const searchUsersSchema = {
+  query: z.string().optional(),
+  forceRefresh: z.boolean().optional(),
+};
 
 function registerTool(name, description, schemaShape, handler) {
   mcpServer.registerTool(
@@ -899,6 +998,12 @@ registerTool('create_area', 'Create a new FogBugz area.', createAreaSchema, hand
 registerTool('edit_area', 'Edit an existing FogBugz area.', editAreaSchema, handleEditArea);
 registerTool('list_custom_fields', 'List custom field names available on a case.', listCustomFieldSchema, handleListCustomFields);
 registerTool('case_link', 'Return the FogBugz web URL for a case.', singleIxBugSchema, handleCaseLink);
+registerTool(
+  'search_users',
+  'Search FogBugz people by name/email using a cached listPeople call (contains match).',
+  searchUsersSchema,
+  handleSearchUsers,
+);
 
 async function start() {
   const transport = new StdioServerTransport();

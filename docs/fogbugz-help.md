@@ -34,6 +34,7 @@
 - `edit_area`: Updates an existing area (`ixArea` required; optional `sArea`, `ixProject`, `ixPersonPrimaryContact`).
 - `list_custom_fields`: Returns the custom-field names available on a specific case by querying `plugin_customfield` columns.
 - `case_link`: Returns the human-facing FogBugz URL for a case (`https://<base>/f/cases/<ixBug>/`).
+- `search_users`: Searches people via `listPeople` with a 5-minute cache and in-memory contains matching (`query`, optional `forceRefresh`).
 - Legacy dotted names (e.g., `fogbugz.help`) still work for backward compatibility.
 
 > `userStory` arguments automatically map to the FogBugz custom field `plugin_customfields_at_fogcreek_com_userxstoryh815` so you never need to remember the raw XML name.
@@ -79,6 +80,10 @@
 - **Reopen a case**  
   1. Call `reactivate_case` with `comment` describing the regression.  
   2. Follow up with `edit_case` if more fields need adjustment.
+- **Search for a user by name/email**  
+  1. Call `search_users` with `query` set to a name or email fragment (e.g., `query="dan"`).  
+  2. Set `forceRefresh=true` to clear the 5-minute cache when you need fresh results.  
+  3. Read `asof` in the response to see when the cached list was last refreshed.
 - **Find all active cases in a milestone**  
   1. Call `search_cases` (or `case_events` if you need history) with `q="status:active fixfor:\"Milestone Name\""`.  
   2. Optionally add columns (`cols="ixBug,sTitle,sPersonAssignedTo"`) to tailor the response.  

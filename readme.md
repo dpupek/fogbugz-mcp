@@ -151,6 +151,7 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `edit_area` | Edit an existing area. | Required: `ixArea`. Optional: `sArea`, `ixProject`, `ixPersonPrimaryContact`. |
 | `list_custom_fields` | Return the custom-field names configured for a specific case. | `ixBug` required. Helps discover field keys like `plugin_customfields_at_fogcreek_com_*`. |
 | `case_link` | Build the FogBugz web URL a human can click. | `ixBug` required; uses your `FOGBUGZ_BASE` minus `/api.asp` to form `https://.../f/cases/<ixBug>/`. |
+| `search_users` | Search people via cached `listPeople` results with in-memory contains matching. | Optional: `query` (name/email substring), `forceRefresh` to bypass the 5-minute cache. |
 
 Example MCP call payload:
 ```json

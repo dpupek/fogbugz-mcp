@@ -290,6 +290,12 @@ function addColumn(cols, column) {
   return Array.from(set).join(',');
 }
 
+function buildViewCaseCols(cols, includeAttachments) {
+  let colString = columnsWithDefaults(cols);
+  if (includeAttachments) colString = addColumn(colString, 'events');
+  return colString;
+}
+
 function applyTextTypeToEvent({ textType, eventText, fields }) {
   const resolvedTextType = textType ?? 'plain';
   let finalEventText = eventText;
@@ -410,9 +416,19 @@ function buildEventPayload({ cmd, ixBug, eventText, fields, textType }) {
   return payload;
 }
 
+function buildCommentWithAttachmentPayload({ ixBug, text, textType, filename, contentBase64 }) {
+  const attachFiles = buildAttachFormData({ ixBug, filename, contentBase64 });
+  const commentPayload = buildEventPayload({
+    cmd: 'edit',
+    ixBug,
+    eventText: text,
+    textType,
+  });
+  return { attachFiles, commentPayload };
+}
+
 async function handleViewCase({ ixBug, cols, includeAttachments }) {
-  let colString = columnsWithDefaults(cols);
-  if (includeAttachments) colString = addColumn(colString, 'events');
+  const colString = buildViewCaseCols(cols, includeAttachments);
   const resp = await fbCall({ cmd: 'view', ixBug: String(ixBug), cols: colString });
   let caseData = resp?.case;
 
@@ -515,6 +531,28 @@ async function handleAttach({ ixBug, filename, contentBase64 }) {
   files.append('File1', buf, { filename });
   const resp = await fbCall({}, files);
   return jsonResult(resp);
+}
+
+function buildAttachFormData({ ixBug, filename, contentBase64 }) {
+  const buf = Buffer.from(contentBase64, 'base64');
+  const files = new FormData();
+  files.append('cmd', 'attach');
+  files.append('ixBug', String(ixBug));
+  files.append('File1', buf, { filename });
+  return files;
+}
+
+async function handleCommentWithAttachment({ ixBug, text, textType, filename, contentBase64 }) {
+  const { attachFiles, commentPayload } = buildCommentWithAttachmentPayload({
+    ixBug,
+    text,
+    textType,
+    filename,
+    contentBase64,
+  });
+  const attachResp = await fbCall({}, attachFiles);
+  const commentResp = await fbCall(commentPayload);
+  return jsonResult({ ok: true, attachment: attachResp, comment: commentResp });
 }
 
 async function handleChildren({ ixBug }) {
@@ -1004,6 +1042,13 @@ const editSchema = {
 };
 const commentSchema = { ixBug: z.number().int(), text: z.string(), textType: z.enum(['plain', 'html', 'markdown']).optional() };
 const attachSchema = { ixBug: z.number().int(), filename: z.string(), contentBase64: z.string() };
+const commentWithAttachmentSchema = {
+  ixBug: z.number().int(),
+  text: z.string(),
+  textType: z.enum(['plain', 'html', 'markdown']).optional(),
+  filename: z.string(),
+  contentBase64: z.string(),
+};
 const singleIxBugSchema = { ixBug: z.number().int() };
 const optionalFieldsSchema = {
   ixBug: z.number().int(),
@@ -1101,6 +1146,13 @@ registerTool('add_comment', 'Add a comment to a case.', commentSchema, handleCom
 
 registerTool('attach_file', 'Attach a base64-encoded file to a case.', attachSchema, handleAttach);
 
+registerTool(
+  'add_comment_with_attachment',
+  'Add a comment to a case and attach a file in one call.',
+  commentWithAttachmentSchema,
+  handleCommentWithAttachment,
+);
+
 registerTool('list_children', 'List child cases of a parent.', singleIxBugSchema, handleChildren);
 registerTool('case_outline', 'Return the full outline/descendant tree for a case (outline:<ixBug>).', viewSchema, handleCaseOutline);
 
@@ -1172,8 +1224,11 @@ if (isMain) {
 
 export {
   applyTextTypeToEvent,
+  buildAttachFormData,
   buildCreateCasePayload,
   buildEventPayload,
+  buildCommentWithAttachmentPayload,
   buildAttachmentDownloadUrl,
+  buildViewCaseCols,
   updateAttachmentUrlsInCase,
 };

@@ -132,6 +132,7 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `create_case` | Create a new FogBugz case. Supports parent/milestone/category and the custom `userStory` text. | Required: `title`, `ixProject`. Optional: `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`, `textType` (`plain`, `html`, `markdown`). |
 | `edit_case` | Update an existing case. You can change the title, `userStory`, or any FogBugz XML field via the `fields` map. | Required: `ixBug`. Optional: `event`, `fields`, `title`, `userStory`, `textType` (`plain`, `html`, `markdown`). |
 | `add_comment` | Add a comment/event to a case. | `ixBug`, `text`, optional `textType` (`plain`, `html`, `markdown`). |
+| `add_comment_with_attachment` | Add a comment and upload a single attachment in one call. | `ixBug`, `text`, `filename`, `contentBase64`, optional `textType` (`plain`, `html`, `markdown`). |
 | `attach_file` | Upload an attachment using base64 content. | `ixBug`, `filename`, `contentBase64`. |
 | `list_children` | Return the parent case plus its children (ID, title, assignee, timestamps). | `ixBug` (parent). Handles null IDs by coercing response columns. |
 | `case_outline` | Build the entire descendant tree using FogBugz `outline:<ixBug>` search. | `ixBug` (required) plus optional `cols`. Returns `outline` (root) and `forest` (all top-level branches). |

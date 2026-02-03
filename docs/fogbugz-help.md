@@ -15,6 +15,7 @@
 - `create_case`: Create a case (`title`, `ixProject` required; supports `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`, `textType`).
 - `edit_case`: Update title, user story (`userStory`), event, or arbitrary FogBugz fields. Optional `textType` (`plain`, `html`, `markdown`) sets `fRichText=1` and converts markdown to HTML.
 - `add_comment`: Adds an event comment (`text`) to a case. Optional `textType` (`plain`, `html`, `markdown`) sets `fRichText=1` and converts markdown to HTML.
+- `add_comment_with_attachment`: Adds a comment and uploads a single attachment (`filename`, `contentBase64`) in one call. Optional `textType` (`plain`, `html`, `markdown`) for the comment.
 - `attach_file`: Uploads a base64-encoded attachment (`contentBase64`) as `filename`.
 - `list_children`: Lists child cases. Falls back to a search when `ixBugChildren` is absent.
 - `case_outline`: Returns the full descendant tree for a case using the FogBugz `outline:<ixBug>` search syntax (handy for epics/parent tracking).
@@ -70,6 +71,10 @@
   1. Base64-encode the file content.  
   2. Call `attach_file` with `ixBug`, `filename`, and the encoded string.  
   3. Confirm via `view_case` with `cols="ixAttachments"` if needed.
+- **Comment + attachment (single call)**  
+  1. Base64-encode the file content.  
+  2. Call `add_comment_with_attachment` with `ixBug`, `text`, `filename`, and `contentBase64`.  
+  3. Use `textType` to send HTML or markdown in the comment if needed.
 - **Create a subcase in a milestone**  
   1. Call `create_case` with `ixBugParent` set to the parent case ID.  
   2. Include `ixFixFor` if the case should start in a specific milestone.  

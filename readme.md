@@ -128,14 +128,14 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `health` | Check configuration and FogBugz API connectivity. | No arguments. |
 | `search_cases` | Run arbitrary FogBugz searches. | `q` (required) plus optional `cols`. Used for lightweight listings. |
 | `case_events` | Same as `search_cases` but forces the `events` column so you get the full event log (can be very large). | Ideal when auditing conversations or history. |
-| `view_case` | Fetch one case by ID with optional columns; auto-includes `ixBug`. | Arguments: `ixBug`, optional `cols`. Returns a normalized JSON payload plus raw XML.
-| `create_case` | Create a new FogBugz case. Supports parent/milestone/category and the custom `userStory` text. | Required: `title`, `ixProject`. Optional: `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`.
-| `edit_case` | Update an existing case. You can change the title, `userStory`, or any FogBugz XML field via the `fields` map. | Required: `ixBug`. Optional: `event`, `fields`, `title`, `userStory`.
-| `add_comment` | Add a comment/event to a case. | `ixBug`, `text`. |
+| `view_case` | Fetch one case by ID with optional columns; auto-includes `ixBug`. | Arguments: `ixBug`, optional `cols`, optional `includeAttachments` (adds `events` and rewrites attachment URLs with the current token).
+| `create_case` | Create a new FogBugz case. Supports parent/milestone/category and the custom `userStory` text. | Required: `title`, `ixProject`. Optional: `event`, `ixArea`, `ixPersonAssignedTo`, `ixBugParent`, `ixFixFor`, `category`, `userStory`, `textType` (`plain`, `html`, `markdown`). |
+| `edit_case` | Update an existing case. You can change the title, `userStory`, or any FogBugz XML field via the `fields` map. | Required: `ixBug`. Optional: `event`, `fields`, `title`, `userStory`, `textType` (`plain`, `html`, `markdown`). |
+| `add_comment` | Add a comment/event to a case. | `ixBug`, `text`, optional `textType` (`plain`, `html`, `markdown`). |
 | `attach_file` | Upload an attachment using base64 content. | `ixBug`, `filename`, `contentBase64`. |
 | `list_children` | Return the parent case plus its children (ID, title, assignee, timestamps). | `ixBug` (parent). Handles null IDs by coercing response columns. |
 | `case_outline` | Build the entire descendant tree using FogBugz `outline:<ixBug>` search. | `ixBug` (required) plus optional `cols`. Returns `outline` (root) and `forest` (all top-level branches). |
-| `resolve_case` | Resolve a case with optional closing comment or field edits. | `ixBug`, optional `comment`, `fields`. |
+| `resolve_case` | Resolve a case with optional closing comment or field edits. | `ixBug`, optional `comment`, `fields`, `textType` (`plain`, `html`, `markdown`). |
 | `reactivate_case` | Re-open a case with optional comment/field payload. | Same schema as `resolve_case`. |
 | `list_categories` | Enumerate every FogBugz category and metadata (`sCategory`, workflow flags, etc.). | No arguments; handy for validating the `category` you pass to `create_case`. |
 | `list_areas` | List undeleted areas (optionally filtered by project). | `ixProject` optional. Useful before creating cases or editing areas. |
@@ -167,6 +167,30 @@ Example MCP call payload:
 }
 ```
 
+HTML rich-text comment example:
+```json
+{
+  "name": "add_comment",
+  "arguments": {
+    "ixBug": 207291,
+    "textType": "html",
+    "text": "<p>Update:</p><ul><li>Item 1</li><li>Item 2</li></ul>"
+  }
+}
+```
+
+Markdown rich-text comment example:
+```json
+{
+  "name": "add_comment",
+  "arguments": {
+    "ixBug": 207291,
+    "textType": "markdown",
+    "text": "## Update\\n- Item 1\\n- Item 2"
+  }
+}
+```
+
 *`userStory` maps to the FogBugz custom field `plugin_customfields_at_fogcreek_com_userxstoryh815`, so you don’t need to remember the raw XML name.*
 
 ---
@@ -175,6 +199,8 @@ Example MCP call payload:
 - **Search then inspect:** Call `search_cases` with `q="ixBug:207291"`, grab the ID, then call `view_case` for enriched columns.
 - **Full audit trail:** Use `case_events` with `cols="sTitle,events"` to stream every change along with event codes (see FogBugz docs for the code legend).
 - **Create + comment:** After `create_case` returns the new `ixBug`, immediately call `add_comment` to capture additional context while Codex still has it in memory.
+- **Rich-text HTML comment:** Use `add_comment` with `textType="html"` and HTML in `text` (FogBugz will render it when `fRichText=1` is set).
+- **Rich-text Markdown comment:** Use `add_comment` with `textType="markdown"` and markdown in `text` (the server converts it to HTML before sending).
 - **Hierarchy review:** `list_children` returns both the parent echo and each child’s `ixBug`, `sTitle`, `sStatus`, `ixPersonAssignedTo`, and `dtLastUpdated`.
 - **Epic outline:** Use `case_outline` to pull the entire descendant tree (parent ➜ children ➜ grandchildren) before planning or bulk edits.
 

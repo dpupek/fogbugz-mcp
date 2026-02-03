@@ -4,6 +4,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { marked } from 'marked';
 import { request } from 'undici';
 import { parseStringPromise } from 'xml2js';
 import FormData from 'form-data';
@@ -278,8 +279,140 @@ function withUserStory(record) {
   return { ...record, userStory: record[USER_STORY_FIELD] };
 }
 
-async function handleViewCase({ ixBug, cols }) {
-  const colString = columnsWithDefaults(cols);
+function addColumn(cols, column) {
+  const set = new Set(
+    cols
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  set.add(column);
+  return Array.from(set).join(',');
+}
+
+function applyTextTypeToEvent({ textType, eventText, fields }) {
+  const resolvedTextType = textType ?? 'plain';
+  let finalEventText = eventText;
+  let finalFields = fields;
+  if (resolvedTextType === 'markdown') {
+    if (finalEventText) finalEventText = marked.parse(String(finalEventText));
+    if (finalFields && Object.prototype.hasOwnProperty.call(finalFields, 'sEvent')) {
+      finalFields = { ...finalFields, sEvent: marked.parse(String(finalFields.sEvent)) };
+    }
+  }
+  return { resolvedTextType, eventText: finalEventText, fields: finalFields };
+}
+
+function buildAttachmentDownloadUrl(sUrl, { baseUrl = WEB_BASE, token = FOGBUGZ_TOKEN } = {}) {
+  if (!sUrl) return sUrl;
+  const cleaned = String(sUrl).replace(/&amp;/g, '&');
+  if (!baseUrl) return cleaned;
+  let url;
+  try {
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    url = new URL(cleaned, normalizedBase);
+  } catch {
+    return cleaned;
+  }
+  url.searchParams.delete('sTicket');
+  if (token) url.searchParams.set('token', token);
+  return url.toString();
+}
+
+function normalizeEventList(events) {
+  if (!events) return [];
+  if (Array.isArray(events)) return events;
+  if (events.event) return Array.isArray(events.event) ? events.event : [events.event];
+  return [events];
+}
+
+function normalizeAttachmentList(container) {
+  if (!container) return [];
+  const list = container.attachment ?? container;
+  if (!list) return [];
+  return Array.isArray(list) ? list : [list];
+}
+
+function updateAttachmentUrlsInEvent(event, options) {
+  if (!event || typeof event !== 'object') return;
+  for (const key of ['rgAttachments', 'attachments']) {
+    const container = event[key];
+    if (!container) continue;
+    const attachments = normalizeAttachmentList(container);
+    for (const attachment of attachments) {
+      if (!attachment || typeof attachment !== 'object') continue;
+      const updated = buildAttachmentDownloadUrl(attachment.sURL, options);
+      if (updated) attachment.sURL = updated;
+    }
+  }
+}
+
+function updateAttachmentUrlsInEvents(events, options) {
+  const list = normalizeEventList(events);
+  list.forEach((event) => updateAttachmentUrlsInEvent(event, options));
+}
+
+function updateAttachmentUrlsInCase(caseData, options) {
+  if (!caseData) return;
+  if (Array.isArray(caseData)) {
+    caseData.forEach((item) => updateAttachmentUrlsInCase(item, options));
+    return;
+  }
+  updateAttachmentUrlsInEvents(caseData.events, options);
+}
+
+function cloneJson(value) {
+  if (value === undefined || value === null) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
+function resolveCategoryValue(category) {
+  if (category === undefined || category === null || String(category).trim() === '') return undefined;
+  if (Number.isInteger(category)) return category;
+  const parsed = Number.parseInt(category, 10);
+  if (!Number.isNaN(parsed)) return parsed;
+  throw new Error('Unknown category value. Provide numeric FogBugz category id.');
+}
+
+function buildCreateCasePayload(args) {
+  const categoryValue = resolveCategoryValue(args.category);
+  const userStoryValue = args.userStory ?? args['21_UserStory'];
+  const { resolvedTextType, eventText } = applyTextTypeToEvent({
+    textType: args.textType,
+    eventText: args.event || 'Created via MCP',
+  });
+  const payload = {
+    cmd: 'new',
+    sTitle: args.title,
+    sEvent: eventText,
+    ixProject: String(args.ixProject),
+    ...(args.ixArea ? { ixArea: String(args.ixArea) } : {}),
+    ...(args.ixPersonAssignedTo ? { ixPersonAssignedTo: String(args.ixPersonAssignedTo) } : {}),
+    ...(args.ixBugParent ? { ixBugParent: String(args.ixBugParent) } : {}),
+    ...(args.ixFixFor ? { ixFixFor: String(args.ixFixFor) } : {}),
+    ...(categoryValue !== undefined ? { ixCategory: String(categoryValue) } : {}),
+    ...(userStoryValue ? { [USER_STORY_FIELD]: String(userStoryValue) } : {}),
+  };
+  if (resolvedTextType !== 'plain') payload.fRichText = '1';
+  return payload;
+}
+
+function buildEventPayload({ cmd, ixBug, eventText, fields, textType }) {
+  const { resolvedTextType, eventText: finalEventText, fields: finalFields } = applyTextTypeToEvent({
+    textType,
+    eventText,
+    fields,
+  });
+  const payload = { cmd, ixBug: String(ixBug) };
+  if (finalEventText) payload.sEvent = finalEventText;
+  if (finalFields) for (const [k, v] of Object.entries(finalFields)) payload[k] = String(v);
+  if (resolvedTextType !== 'plain') payload.fRichText = '1';
+  return payload;
+}
+
+async function handleViewCase({ ixBug, cols, includeAttachments }) {
+  let colString = columnsWithDefaults(cols);
+  if (includeAttachments) colString = addColumn(colString, 'events');
   const resp = await fbCall({ cmd: 'view', ixBug: String(ixBug), cols: colString });
   let caseData = resp?.case;
 
@@ -303,6 +436,10 @@ async function handleViewCase({ ixBug, cols }) {
     }));
   } else if (caseData && typeof caseData === 'object') {
     caseData = withUserStory({ ...caseData, ixBug: normalizeIxBug(caseData.ixBug, ixBug), _source: 'view' });
+  }
+  if (includeAttachments) {
+    caseData = cloneJson(caseData);
+    updateAttachmentUrlsInCase(caseData, { baseUrl: WEB_BASE, token: FOGBUGZ_TOKEN });
   }
   return jsonResult({ case: caseData, raw: resp });
 }
@@ -329,48 +466,44 @@ async function handleCaseEvents({ q, cols }) {
 }
 
 async function handleCreateCase(args) {
-  let categoryValue;
-  if (args.category !== undefined && args.category !== null && String(args.category).trim() !== '') {
-    if (Number.isInteger(args.category)) {
-      categoryValue = args.category;
-    } else if (!Number.isNaN(Number.parseInt(args.category, 10))) {
-      categoryValue = Number.parseInt(args.category, 10);
-    } else {
-      throw new Error('Unknown category value. Provide numeric FogBugz category id.');
-    }
-  }
-
-  const userStoryValue = args.userStory ?? args['21_UserStory'];
-  const payload = {
-    cmd: 'new',
-    sTitle: args.title,
-    sEvent: args.event || 'Created via MCP',
-    ixProject: String(args.ixProject),
-    ...(args.ixArea ? { ixArea: String(args.ixArea) } : {}),
-    ...(args.ixPersonAssignedTo ? { ixPersonAssignedTo: String(args.ixPersonAssignedTo) } : {}),
-    ...(args.ixBugParent ? { ixBugParent: String(args.ixBugParent) } : {}),
-    ...(args.ixFixFor ? { ixFixFor: String(args.ixFixFor) } : {}),
-    ...(categoryValue !== undefined ? { ixCategory: String(categoryValue) } : {}),
-    ...(userStoryValue ? { [USER_STORY_FIELD]: String(userStoryValue) } : {}),
-  };
-
+  const payload = buildCreateCasePayload(args);
   const resp = await fbCall(payload);
   return jsonResult({ ixBug: Number(resp?.case?.ixBug), raw: resp });
 }
 
-async function handleEditCase({ ixBug, event, fields, title, userStory, '21_UserStory': legacyUserStory }) {
+async function handleEditCase({
+  ixBug,
+  event,
+  fields,
+  title,
+  userStory,
+  '21_UserStory': legacyUserStory,
+  textType,
+}) {
+  const { resolvedTextType, eventText, fields: finalFields } = applyTextTypeToEvent({
+    textType,
+    eventText: event,
+    fields,
+  });
   const payload = { cmd: 'edit', ixBug: String(ixBug) };
-  if (event) payload.sEvent = event;
+  if (eventText) payload.sEvent = eventText;
   if (title) payload.sTitle = title;
   const finalStory = userStory ?? legacyUserStory;
   if (finalStory) payload[USER_STORY_FIELD] = finalStory;
-  if (fields) for (const [k, v] of Object.entries(fields)) payload[k] = String(v);
+  if (finalFields) for (const [k, v] of Object.entries(finalFields)) payload[k] = String(v);
+  if (resolvedTextType !== 'plain') payload.fRichText = '1';
   const resp = await fbCall(payload);
   return jsonResult(resp);
 }
 
-async function handleComment({ ixBug, text }) {
-  const resp = await fbCall({ cmd: 'edit', ixBug: String(ixBug), sEvent: text });
+async function handleComment({ ixBug, text, textType }) {
+  const payload = buildEventPayload({
+    cmd: 'edit',
+    ixBug,
+    eventText: text,
+    textType,
+  });
+  const resp = await fbCall(payload);
   return jsonResult(resp);
 }
 
@@ -455,18 +588,26 @@ async function handleCaseOutline({ ixBug, cols }) {
   });
 }
 
-async function handleResolve({ ixBug, comment, fields }) {
-  const payload = { cmd: 'resolve', ixBug: String(ixBug) };
-  if (comment) payload.sEvent = comment;
-  if (fields) for (const [k, v] of Object.entries(fields)) payload[k] = String(v);
+async function handleResolve({ ixBug, comment, fields, textType }) {
+  const payload = buildEventPayload({
+    cmd: 'resolve',
+    ixBug,
+    eventText: comment,
+    fields,
+    textType,
+  });
   const resp = await fbCall(payload);
   return jsonResult({ ok: true, raw: resp });
 }
 
-async function handleReactivate({ ixBug, comment, fields }) {
-  const payload = { cmd: 'reactivate', ixBug: String(ixBug) };
-  if (comment) payload.sEvent = comment;
-  if (fields) for (const [k, v] of Object.entries(fields)) payload[k] = String(v);
+async function handleReactivate({ ixBug, comment, fields, textType }) {
+  const payload = buildEventPayload({
+    cmd: 'reactivate',
+    ixBug,
+    eventText: comment,
+    fields,
+    textType,
+  });
   const resp = await fbCall(payload);
   return jsonResult({ ok: true, raw: resp });
 }
@@ -834,7 +975,11 @@ const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.2' }, { ins
 
 const noopSchema = {};
 const searchSchema = { q: z.string(), cols: z.string().optional() };
-const viewSchema = { ixBug: z.number().int(), cols: z.string().optional() };
+const viewSchema = {
+  ixBug: z.number().int(),
+  cols: z.string().optional(),
+  includeAttachments: z.boolean().optional(),
+};
 const createSchema = {
   title: z.string(),
   event: z.string().optional(),
@@ -846,6 +991,7 @@ const createSchema = {
   category: z.union([z.string(), z.number()]).optional(),
   userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
+  textType: z.enum(['plain', 'html', 'markdown']).optional(),
 };
 const editSchema = {
   ixBug: z.number().int(),
@@ -854,14 +1000,16 @@ const editSchema = {
   title: z.string().optional(),
   userStory: z.string().optional(),
   '21_UserStory': z.string().optional(),
+  textType: z.enum(['plain', 'html', 'markdown']).optional(),
 };
-const commentSchema = { ixBug: z.number().int(), text: z.string() };
+const commentSchema = { ixBug: z.number().int(), text: z.string(), textType: z.enum(['plain', 'html', 'markdown']).optional() };
 const attachSchema = { ixBug: z.number().int(), filename: z.string(), contentBase64: z.string() };
 const singleIxBugSchema = { ixBug: z.number().int() };
 const optionalFieldsSchema = {
   ixBug: z.number().int(),
   comment: z.string().optional(),
   fields: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  textType: z.enum(['plain', 'html', 'markdown']).optional(),
 };
 const listAreasSchema = { ixProject: z.number().int().optional() };
 const listStatusSchema = {
@@ -1011,7 +1159,21 @@ async function start() {
   logDebug('MCP server is running', { transport: 'stdio' });
 }
 
-start().catch((error) => {
-  console.error('Server error:', error);
-  process.exit(1);
-});
+const entryPath = path.resolve(process.argv[1] || '');
+const modulePath = path.resolve(fileURLToPath(import.meta.url));
+const isMain = entryPath && entryPath === modulePath;
+
+if (isMain) {
+  start().catch((error) => {
+    console.error('Server error:', error);
+    process.exit(1);
+  });
+}
+
+export {
+  applyTextTypeToEvent,
+  buildCreateCasePayload,
+  buildEventPayload,
+  buildAttachmentDownloadUrl,
+  updateAttachmentUrlsInCase,
+};

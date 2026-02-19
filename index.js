@@ -38,6 +38,31 @@ const DEFAULT_COLS = [
   'plugin_customfields_at_fogcreek_com_userxstoryh815',
 ];
 const USER_STORY_FIELD = 'plugin_customfields_at_fogcreek_com_userxstoryh815';
+const COLUMN_METADATA_COMMAND_CANDIDATES = ['listColumns', 'listcols', 'listSearchColumns', 'listsearchcolumns'];
+const CORE_COLUMN_CATALOG = [
+  { id: 'ixBug', name: 'Case ID', type: 'ix', source: 'core' },
+  { id: 'sTitle', name: 'Title', type: 's', source: 'core' },
+  { id: 'sStatus', name: 'Status', type: 's', source: 'core' },
+  { id: 'sFixFor', name: 'Milestone', type: 's', source: 'core' },
+  { id: 'ixBugParent', name: 'Parent Case ID', type: 'ix', source: 'core' },
+  { id: 'ixBugChildren', name: 'Child Case IDs', type: 'ix', source: 'core' },
+  { id: 'sLatestTextSummary', name: 'Latest Text Summary', type: 's', source: 'core' },
+  { id: 'sPersonAssignedTo', name: 'Assigned To', type: 's', source: 'core' },
+  { id: 'ixPersonAssignedTo', name: 'Assigned To ID', type: 'ix', source: 'core' },
+  { id: 'sArea', name: 'Area', type: 's', source: 'core' },
+  { id: 'sProject', name: 'Project', type: 's', source: 'core' },
+  { id: 'ixCategory', name: 'Category ID', type: 'ix', source: 'core' },
+  { id: 'sCategory', name: 'Category', type: 's', source: 'core' },
+  { id: 'sPriority', name: 'Priority', type: 's', source: 'core' },
+  { id: 'dtLastUpdated', name: 'Last Updated', type: 'dt', source: 'core' },
+  { id: 'events', name: 'Events', type: 'unknown', source: 'core' },
+  {
+    id: 'plugin_customfields_at_fogcreek_com_userxstoryh815',
+    name: 'User Story',
+    type: 'plugin_customfield',
+    source: 'core',
+  },
+];
 const PEOPLE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let peopleCache = {
@@ -270,6 +295,129 @@ function loadPackageVersion() {
 function columnsWithDefaults(cols) {
   const userCols = cols ? cols.split(',').map((c) => c.trim()).filter(Boolean) : [];
   return [...new Set([...DEFAULT_COLS, ...userCols])].join(',');
+}
+
+function toArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function humanizeCustomFieldId(id) {
+  return String(id)
+    .replace(/^plugin_customfields?_/i, '')
+    .replace(/_at_/gi, ' @ ')
+    .replace(/_x/gi, ' ')
+    .replace(/_/g, ' ')
+    .trim();
+}
+
+function inferFogBugzishType(columnId) {
+  const id = String(columnId || '');
+  if (!id) return 'unknown';
+  if (/^plugin_customfields?/i.test(id)) return 'plugin_customfield';
+  if (/^ix[A-Z0-9_]/.test(id)) return 'ix';
+  if (/^s[A-Z0-9_]/.test(id)) return 's';
+  if (/^dt[A-Z0-9_]/.test(id)) return 'dt';
+  if (/^f[A-Z0-9_]/.test(id)) return 'f';
+  if (/^n[A-Z0-9_]/.test(id)) return 'n';
+  if (/^hrs[A-Z0-9_]/.test(id)) return 'hrs';
+  return 'unknown';
+}
+
+function normalizeColumnEntry(entry, fallbackSource) {
+  if (!entry || typeof entry !== 'object') return null;
+  const id = entry.id ?? entry.ixColumn ?? entry.sColumn ?? entry.column ?? entry.field ?? entry.fieldname ?? entry.name;
+  if (isBlank(id)) return null;
+  const normalizedId = String(id).trim();
+  const name = entry.name ?? entry.sName ?? entry.fieldname ?? entry.title ?? normalizedId;
+  const type = entry.type ?? entry.sType ?? entry.columnType ?? entry.datatype ?? inferFogBugzishType(normalizedId);
+  const source = entry.source ?? fallbackSource ?? 'api';
+  return {
+    id: normalizedId,
+    name: String(name).trim() || normalizedId,
+    type: String(type).trim() || inferFogBugzishType(normalizedId),
+    source,
+  };
+}
+
+function mergeColumns(columns) {
+  const merged = new Map();
+  for (const column of columns) {
+    const normalized = normalizeColumnEntry(column);
+    if (!normalized) continue;
+    merged.set(normalized.id, normalized);
+  }
+  return Array.from(merged.values()).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function pickColumnRowsFromMetadataResponse(resp) {
+  const paths = [
+    ['columns', 'column'],
+    ['cols', 'col'],
+    ['searchcolumns', 'column'],
+    ['searchColumns', 'column'],
+    ['fields', 'field'],
+  ];
+  for (const pathParts of paths) {
+    let current = resp;
+    for (const part of pathParts) current = current?.[part];
+    const rows = toArray(current).filter((row) => row && typeof row === 'object');
+    if (rows.length > 0) return rows;
+  }
+  return [];
+}
+
+function addCustomFieldEntry(bucket, { id, name, type }) {
+  if (isBlank(id)) return;
+  const normalizedId = String(id).trim();
+  if (!/^plugin_customfields?/i.test(normalizedId)) return;
+  const normalizedName = !isBlank(name) ? String(name).trim() : humanizeCustomFieldId(normalizedId);
+  bucket.set(normalizedId, {
+    id: normalizedId,
+    name: normalizedName || normalizedId,
+    type: type ? String(type).trim() : 'plugin_customfield',
+    source: 'custom',
+  });
+}
+
+function collectCustomFieldMetadata(source, bucket) {
+  if (!source) return;
+  if (Array.isArray(source)) {
+    source.forEach((item) => collectCustomFieldMetadata(item, bucket));
+    return;
+  }
+  if (typeof source === 'string') {
+    addCustomFieldEntry(bucket, { id: source });
+    return;
+  }
+  if (typeof source !== 'object') return;
+
+  const idCandidates = [source.fieldid, source.id, source.sField, source.field, source.fieldname];
+  const nameCandidates = [source.name, source.sName, source.fieldname, source.Title, source.title];
+  const typeCandidates = [source.type, source.sType, source.datatype];
+  const firstId = idCandidates.find((value) => !isBlank(value));
+  const firstName = nameCandidates.find((value) => !isBlank(value));
+  const firstType = typeCandidates.find((value) => !isBlank(value));
+  if (firstId) addCustomFieldEntry(bucket, { id: firstId, name: firstName, type: firstType });
+
+  for (const [key, value] of Object.entries(source)) {
+    if (/^plugin_customfields?/i.test(key)) {
+      addCustomFieldEntry(bucket, {
+        id: key,
+        name: typeof value === 'string' ? value : firstName,
+        type: firstType,
+      });
+    }
+    if (value && typeof value === 'object') collectCustomFieldMetadata(value, bucket);
+  }
+}
+
+function extractCustomFieldEntriesFromCase(caseData) {
+  const bucket = new Map();
+  if (!caseData || typeof caseData !== 'object') return [];
+  collectCustomFieldMetadata(caseData.plugin_customfields, bucket);
+  collectCustomFieldMetadata(caseData.plugin_customfield, bucket);
+  return Array.from(bucket.values()).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function withUserStory(record) {
@@ -894,37 +1042,98 @@ async function handleEditArea({ ixArea, sArea, ixProject, ixPersonPrimaryContact
   return jsonResult(resp);
 }
 
-function collectCustomFieldNames(source, bucket) {
-  if (!source) return;
-  if (Array.isArray(source)) {
-    source.forEach((item) => collectCustomFieldNames(item, bucket));
-    return;
-  }
-  if (typeof source === 'string') {
-    if (source.trim()) bucket.add(source.trim());
-    return;
-  }
-  if (typeof source !== 'object') return;
-
-  const possibleName = source.fieldname || source.name || source.Title || source.title;
-  if (possibleName) bucket.add(String(possibleName));
-
-  for (const value of Object.values(source)) {
-    if (value && typeof value === 'object') collectCustomFieldNames(value, bucket);
-  }
-}
-
 async function handleListCustomFields({ ixBug }) {
   const resp = await fbCall({ cmd: 'search', q: String(ixBug), cols: 'plugin_customfield,plugin_customfields' });
   let cases = resp?.cases?.case || [];
   if (!Array.isArray(cases)) cases = cases ? [cases] : [];
   const target = cases.find((item) => Number(item?.ixBug) === Number(ixBug)) || cases[0];
-  const names = new Set();
-  if (target) {
-    collectCustomFieldNames(target.plugin_customfields, names);
-    collectCustomFieldNames(target.plugin_customfield, names);
+  const customEntries = target ? extractCustomFieldEntriesFromCase(target) : [];
+  const customFields = customEntries.map((item) => item.id);
+  return jsonResult({ ixBug, customFields, rawCount: customFields.length });
+}
+
+async function fetchCustomColumnsForCase(ixBug, callFn = fbCall) {
+  const resp = await callFn({ cmd: 'search', q: String(ixBug), cols: 'ixBug,plugin_customfield,plugin_customfields' });
+  let cases = resp?.cases?.case || [];
+  if (!Array.isArray(cases)) cases = cases ? [cases] : [];
+  const target = cases.find((item) => Number(item?.ixBug) === Number(ixBug)) || cases[0];
+  return target ? extractCustomFieldEntriesFromCase(target) : [];
+}
+
+async function tryDiscoverColumnsViaMetadataApi(callFn = fbCall) {
+  const warnings = [];
+  for (const cmd of COLUMN_METADATA_COMMAND_CANDIDATES) {
+    try {
+      const resp = await callFn({ cmd });
+      const rows = pickColumnRowsFromMetadataResponse(resp);
+      const normalized = mergeColumns(rows.map((row) => normalizeColumnEntry(row, 'api')).filter(Boolean));
+      if (normalized.length > 0) return { strategy: 'api_metadata', command: cmd, warnings, columns: normalized };
+      warnings.push(`Column metadata command "${cmd}" returned no usable rows.`);
+    } catch (err) {
+      warnings.push(`Column metadata command "${cmd}" failed: ${err?.message || 'unknown error'}`);
+    }
   }
-  return jsonResult({ ixBug, customFields: Array.from(names), rawCount: names.size });
+  return { strategy: 'fallback', command: null, warnings, columns: [] };
+}
+
+function summarizeColumnCounts(columns) {
+  return {
+    total: columns.length,
+    core: columns.filter((item) => item.source === 'core').length,
+    custom: columns.filter((item) => item.source === 'custom').length,
+  };
+}
+
+async function buildColumnCatalog(args = {}, deps = {}) {
+  const callFn = deps.callFn || fbCall;
+  const includeCustom = args.includeCustom !== false;
+  const forceFallback = args.forceFallback === true;
+  const ixBug = args.ixBug ?? null;
+  const warnings = [];
+
+  let strategy = 'fallback';
+  let coverage = 'partial';
+  let baseColumns = mergeColumns(CORE_COLUMN_CATALOG);
+  if (!forceFallback) {
+    const discovered = await tryDiscoverColumnsViaMetadataApi(callFn);
+    warnings.push(...discovered.warnings);
+    if (discovered.strategy === 'api_metadata' && discovered.columns.length > 0) {
+      strategy = 'api_metadata';
+      coverage = 'authoritative';
+      baseColumns = discovered.columns;
+    } else if (discovered.command === null) {
+      warnings.push('Falling back to curated core columns because metadata commands were unavailable.');
+    }
+  } else {
+    warnings.push('forceFallback=true: skipped metadata API probe and used curated fallback columns.');
+  }
+
+  let customColumns = [];
+  if (includeCustom) {
+    if (ixBug !== null) {
+      try {
+        customColumns = await fetchCustomColumnsForCase(ixBug, callFn);
+      } catch (err) {
+        warnings.push(`Failed to discover custom fields for ixBug ${ixBug}: ${err?.message || 'unknown error'}`);
+      }
+    } else {
+      warnings.push('Custom columns are case-scoped; provide ixBug to discover custom field identifiers.');
+    }
+  }
+
+  const columns = mergeColumns([...baseColumns, ...customColumns]);
+  return {
+    strategy,
+    coverage,
+    ixBug,
+    columns,
+    counts: summarizeColumnCounts(columns),
+    warnings,
+  };
+}
+
+async function handleListColumns(args = {}) {
+  return jsonResult(await buildColumnCatalog(args));
 }
 
 async function handleCaseLink({ ixBug }) {
@@ -1009,7 +1218,7 @@ async function handleHealth() {
 }
 
 const instructions = 'Use tools/list to explore available FogBugz actions or call help for guidance.';
-const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.2' }, { instructions });
+const mcpServer = new McpServer({ name: 'fogbugz-mcp', version: '1.0.5' }, { instructions });
 
 const noopSchema = {};
 const searchSchema = { q: z.string(), cols: z.string().optional() };
@@ -1104,6 +1313,11 @@ const searchUsersSchema = {
   query: z.string().optional(),
   forceRefresh: z.boolean().optional(),
 };
+const listColumnsSchema = {
+  ixBug: z.number().int().optional(),
+  includeCustom: z.boolean().optional(),
+  forceFallback: z.boolean().optional(),
+};
 
 function registerTool(name, description, schemaShape, handler) {
   mcpServer.registerTool(
@@ -1197,6 +1411,12 @@ registerTool(
 registerTool('create_area', 'Create a new FogBugz area.', createAreaSchema, handleCreateArea);
 registerTool('edit_area', 'Edit an existing FogBugz area.', editAreaSchema, handleEditArea);
 registerTool('list_custom_fields', 'List custom field names available on a case.', listCustomFieldSchema, handleListCustomFields);
+registerTool(
+  'list_columns',
+  'List available FogBugz case columns with ids, display names, and FogBugz-ish types.',
+  listColumnsSchema,
+  handleListColumns,
+);
 registerTool('case_link', 'Return the FogBugz web URL for a case.', singleIxBugSchema, handleCaseLink);
 registerTool(
   'search_users',
@@ -1230,5 +1450,9 @@ export {
   buildCommentWithAttachmentPayload,
   buildAttachmentDownloadUrl,
   buildViewCaseCols,
+  buildColumnCatalog,
+  inferFogBugzishType,
+  mergeColumns,
+  normalizeColumnEntry,
   updateAttachmentUrlsInCase,
 };

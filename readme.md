@@ -151,8 +151,32 @@ For the full grammar, see FogBugz’ “Search Syntax” guide or run `fogbugz.h
 | `create_area` | Create a new area in a project. | Required: `ixProject`, `sArea`. Optional: `ixPersonPrimaryContact`. |
 | `edit_area` | Edit an existing area. | Required: `ixArea`. Optional: `sArea`, `ixProject`, `ixPersonPrimaryContact`. |
 | `list_custom_fields` | Return the custom-field names configured for a specific case. | `ixBug` required. Helps discover field keys like `plugin_customfields_at_fogcreek_com_*`. |
+| `list_columns` | Return case column metadata (`id`, `name`, `type`, `source`) for building `cols` safely. | Optional: `ixBug` (discover case-scoped custom fields), `includeCustom` (default `true`), `forceFallback` (default `false`). Uses metadata API when available, otherwise curated fallback. |
 | `case_link` | Build the FogBugz web URL a human can click. | `ixBug` required; uses your `FOGBUGZ_BASE` minus `/api.asp` to form `https://.../f/cases/<ixBug>/`. |
 | `search_users` | Search people via cached `listPeople` results with in-memory contains matching. | Optional: `query` (name/email substring), `forceRefresh` to bypass the 5-minute cache. |
+
+Example `list_columns` response:
+```json
+{
+  "strategy": "fallback",
+  "coverage": "partial",
+  "ixBug": 207291,
+  "columns": [
+    { "id": "ixBug", "name": "Case ID", "type": "ix", "source": "core" },
+    { "id": "sTitle", "name": "Title", "type": "s", "source": "core" },
+    {
+      "id": "plugin_customfields_at_fogcreek_com_storypoints",
+      "name": "Story Points",
+      "type": "plugin_customfield",
+      "source": "custom"
+    }
+  ],
+  "counts": { "total": 3, "core": 2, "custom": 1 },
+  "warnings": [
+    "Falling back to curated core columns because metadata commands were unavailable."
+  ]
+}
+```
 
 Example MCP call payload:
 ```json
@@ -198,6 +222,7 @@ Markdown rich-text comment example:
 
 ## 🧪 Workflow snippets
 - **Search then inspect:** Call `search_cases` with `q="ixBug:207291"`, grab the ID, then call `view_case` for enriched columns.
+- **Discover columns before querying:** Call `list_columns` first (optionally with `ixBug`) to get valid field identifiers and FogBugz-ish types before assembling `cols`.
 - **Full audit trail:** Use `case_events` with `cols="sTitle,events"` to stream every change along with event codes (see FogBugz docs for the code legend).
 - **Create + comment:** After `create_case` returns the new `ixBug`, immediately call `add_comment` to capture additional context while Codex still has it in memory.
 - **Rich-text HTML comment:** Use `add_comment` with `textType="html"` and HTML in `text` (FogBugz will render it when `fRichText=1` is set).

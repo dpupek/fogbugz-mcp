@@ -27,6 +27,7 @@
 - `list_categories` – List FogBugz categories (`ixCategory`, metadata) via `cmd=listCategories`.
 - `list_areas` – List undeleted areas, optionally filtered by `ixProject` via `cmd=listAreas`.
 - `list_custom_fields` – Discover custom-field names on a case by running a `search` with `cols=plugin_customfield`.
+- `list_columns` – Return available case column metadata (`id`, `name`, `type`, `source`) using metadata API when available, with curated fallback and optional case-scoped custom-field discovery.
 - `case_link` – Produce the human-facing FogBugz URL for a case using the base URL (e.g., `https://example.fogbugz.com/f/cases/<ixBug>/`).
 - `search_users` – Search people via cached `listPeople` results with in-memory contains matching (`query`, optional `forceRefresh`).
 - `add_comment` – Add a comment (`ixBug`, `text`).

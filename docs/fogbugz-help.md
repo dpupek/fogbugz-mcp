@@ -34,6 +34,7 @@
 - `create_area`: Creates a new area (`ixProject`, `sArea` required; optional `ixPersonPrimaryContact`).
 - `edit_area`: Updates an existing area (`ixArea` required; optional `sArea`, `ixProject`, `ixPersonPrimaryContact`).
 - `list_custom_fields`: Returns the custom-field names available on a specific case by querying `plugin_customfield` columns.
+- `list_columns`: Returns case column metadata (`id`, `name`, `type`, `source`) using API metadata when possible, with fallback to curated core columns and optional case-scoped custom fields.
 - `case_link`: Returns the human-facing FogBugz URL for a case (`https://<base>/f/cases/<ixBug>/`).
 - `search_users`: Searches people via `listPeople` with a 5-minute cache and in-memory contains matching (`query`, optional `forceRefresh`).
 - Legacy dotted names (e.g., `fogbugz.help`) still work for backward compatibility.
@@ -49,6 +50,7 @@
 - Date filters: `opened:"last 7 days"`, `edited:"this week"`, `due:>2024-12-01`.
 - Metadata filters: `type:"Bug"`, `priority:"High"`, `milestone:"Q4 Release"`, `tag:"ui"`.
 - Append `cols=field1,field2` to control returned columns (our tools preload a rich default set).
+- Call `list_columns` to inspect available columns and FogBugz-ish type classes before building `cols` strings.
 - Test queries in the FogBugz search UI; MCP uses the same syntax/engine.
 
 ### Category Notes
@@ -109,6 +111,11 @@
   2. Traverse the `children` arrays directly, or for richer fields call `view_case` on each `ixBug`.  
   3. Combine with `list_children` if you only need a single level of the hierarchy.
   4. Use the cols param to include columns for each child. This way you can pull details for many decendants at once. NOTE: Be careful with the cols, because you could inflect a large data pull that may fail.
+- **Discover available columns before search/view**  
+  1. Call `list_columns` with no args for global/core metadata.  
+  2. Add `ixBug` to include custom field identifiers for that case context.  
+  3. Use `includeCustom=false` when you only want non-custom metadata.  
+  4. Use `forceFallback=true` for deterministic fallback behavior in diagnostics.
 - **Include attachments for a case**  
   1. Call `view_case` with `includeAttachments=true` to pull `events` and rewrite attachment URLs with the current token.  
   2. Inspect `case.events` for `rgAttachments` and use the rewritten `sURL` for downloads.
